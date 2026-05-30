@@ -1,4 +1,5 @@
 use super::InstalledTool;
+use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::process::Command;
 use serde_json::Value;
@@ -22,14 +23,24 @@ pub fn parse_npm(ls_json: &str, outdated_json: &str) -> Vec<InstalledTool> {
     if let Ok(od) = serde_json::from_str::<Value>(outdated_json) {
         if let Some(obj) = od.as_object() {
             for (pkg, info) in obj {
-                let latest = info.get("latest").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let current = info.get("current").and_then(|v| v.as_str()).map(|s| s.to_string());
-                let entry = map.entry(pkg.clone()).or_insert((current.clone(), latest.clone()));
-                if current.is_some() {
-                    entry.0 = current;
-                }
-                if !latest.is_empty() {
-                    entry.1 = latest;
+                let latest = info.get("latest").and_then(|v| v.as_str()).unwrap_or("");
+                let current = info.get("current").and_then(|v| v.as_str());
+                match map.entry(pkg.clone()) {
+                    Entry::Occupied(mut o) => {
+                        let e = o.get_mut();
+                        if let Some(c) = current {
+                            e.0 = Some(c.to_string());
+                        }
+                        if !latest.is_empty() {
+                            e.1 = latest.to_string();
+                        }
+                    }
+                    Entry::Vacant(v) => {
+                        // Skip malformed outdated entries that carry no latest version.
+                        if !latest.is_empty() {
+                            v.insert((current.map(|s| s.to_string()), latest.to_string()));
+                        }
+                    }
                 }
             }
         }
@@ -60,7 +71,7 @@ fn run_npm(args: &[&str]) -> String {
     Command::new("npm")
         .args(args)
         .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
         .unwrap_or_default()
 }
 
@@ -102,5 +113,20 @@ mod tests {
     fn empty_or_garbage_output_yields_no_rows() {
         assert!(parse_npm("", "").is_empty());
         assert!(parse_npm("not json", "also not json").is_empty());
+    }
+
+    #[test]
+    fn package_only_in_outdated_is_included() {
+        let rows = parse_npm("{}", r#"{"vercel":{"current":"38.0.0","latest":"39.1.0"}}"#);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].pkg, "vercel");
+        assert_eq!(rows[0].installed.as_deref(), Some("38.0.0"));
+        assert_eq!(rows[0].latest, "39.1.0");
+    }
+
+    #[test]
+    fn malformed_outdated_entry_without_latest_is_skipped() {
+        let rows = parse_npm("{}", r#"{"ghost":{"current":"1.0.0"}}"#);
+        assert!(rows.is_empty());
     }
 }
