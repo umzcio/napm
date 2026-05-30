@@ -157,14 +157,15 @@
     padding:3px 5px; font-weight:bold; display:flex; align-items:center; gap:6px;}
   .splash .body{padding:14px; font-family:var(--mono); font-size:15px; line-height:1.5;}
   .splash .body .ok{color:var(--green);}
-  .cat{font-size:18px;}
+  .brand{height:20px; width:auto; display:block; image-rendering:auto;}
+  .splash .bar .brand{height:18px;}
 </style>
 </head>
 <body>
 
 <div class="window raised" id="win">
   <div class="titlebar" id="titlebar">
-    <span class="cat">🐱</span><span class="logo">napm</span>
+    <img class="brand" src="npstr-logo.svg" alt="npstr"><span class="logo">napm</span>
     <span class="title">- npstr AI Package Manager [Shared Library]</span>
     <span class="spacer"></span>
     <span class="tb-btn">_</span><span class="tb-btn">▢</span><span class="tb-btn">✕</span>
@@ -226,7 +227,7 @@
 
   <div class="splash" id="splash">
     <div class="box raised">
-      <div class="bar"><span class="cat">🐱</span> Connecting to napm</div>
+      <div class="bar"><img class="brand" src="npstr-logo.svg" alt="npstr"> Connecting to napm</div>
       <div class="body" id="splashBody">Dialing registry.npmjs.org</div>
     </div>
   </div>
