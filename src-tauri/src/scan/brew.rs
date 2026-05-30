@@ -148,6 +148,6 @@ mod tests {
         ]}"#;
         let pubs = parse_brew_publishers(info);
         assert_eq!(pubs.get("ripgrep").map(|s| s.as_str()), Some("burntsushi"));
-        assert_eq!(pubs.get("openssl"), None); // non-git homepage yields no publisher
+        assert_eq!(pubs.get("openssl").map(|s| s.as_str()), Some("openssl")); // domain fallback
     }
 }

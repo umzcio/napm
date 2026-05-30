@@ -88,9 +88,14 @@ fn pip_bin() -> Option<&'static str> {
 /// `*.dist-info/METADATA` in python's site-packages directories for `Author`.
 fn pip_publishers() -> BTreeMap<String, String> {
     let mut map = BTreeMap::new();
+    // Include BOTH the global site-packages and the per-user site-packages
+    // (`pip3 install` defaults to the user site on macOS), or most packages are missed.
     let listing = super::run(
         "python3",
-        &["-c", "import site; print('\\n'.join(site.getsitepackages()))"],
+        &[
+            "-c",
+            "import site; print('\\n'.join(site.getsitepackages()+[site.getusersitepackages()]))",
+        ],
     );
     for dir in listing.lines().map(str::trim).filter(|l| !l.is_empty()) {
         let entries = match std::fs::read_dir(dir) {
@@ -106,7 +111,7 @@ fn pip_publishers() -> BTreeMap<String, String> {
                 Err(_) => continue,
             };
             let name = super::publisher::metadata_field(&metadata, "Name");
-            let author = super::publisher::author_from_metadata(&metadata)
+            let author = super::publisher::pip_author(&metadata)
                 .and_then(|a| super::publisher::to_handle(&a));
             if let (Some(n), Some(a)) = (name, author) {
                 map.insert(n.to_lowercase(), a);

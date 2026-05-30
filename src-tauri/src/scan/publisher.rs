@@ -30,10 +30,19 @@ pub fn to_handle(name: &str) -> Option<String> {
     }
 }
 
-/// A usable author name is non-empty and not itself a URL (some packages stuff
-/// a "contributors" link into the author field).
+/// A usable author name is non-empty, not a URL, and not a bare email (some
+/// packages stuff a contributors link or a raw address into the author field).
 fn usable_name(name: &str) -> bool {
-    !name.is_empty() && !name.contains("://")
+    !name.is_empty() && !name.contains("://") && !name.contains('@')
+}
+
+/// Best author handle source from a pip dist-info METADATA body: prefer the
+/// `Author:` line, then fall back to the name portion of `Author-email:`
+/// (modern packaging often leaves `Author` blank and uses `Name <email>`).
+pub fn pip_author(metadata: &str) -> Option<String> {
+    author_from_metadata(metadata).or_else(|| {
+        metadata_field(metadata, "Author-email").and_then(|s| author_name_from_string(&s))
+    })
 }
 
 /// Extract the display name from an npm-style author string, dropping the
@@ -62,9 +71,10 @@ pub fn author_from_pkg_json(author: &Value) -> Option<String> {
     }
 }
 
-/// Extract the owner from a GitHub or GitLab homepage URL.
-/// "https://github.com/BurntSushi/ripgrep" -> "BurntSushi". Returns None for
-/// hosts we do not recognize.
+/// Derive a publisher from a project homepage URL. Prefers the GitHub/GitLab
+/// owner ("https://github.com/BurntSushi/ripgrep" -> "BurntSushi"); otherwise
+/// falls back to the second-level domain label ("https://www.openssl.org/"
+/// -> "openssl"). Returns None when no host is present.
 pub fn publisher_from_homepage(url: &str) -> Option<String> {
     let lower = url.to_ascii_lowercase();
     for host in ["github.com/", "gitlab.com/"] {
@@ -76,7 +86,20 @@ pub fn publisher_from_homepage(url: &str) -> Option<String> {
             }
         }
     }
-    None
+    domain_label(url)
+}
+
+/// The second-level domain label of a URL's host: "https://www.openssl.org/x"
+/// -> "openssl", "https://gnu.org/" -> "gnu". None if there is no dotted host.
+fn domain_label(url: &str) -> Option<String> {
+    let after = url.split("://").nth(1).unwrap_or(url);
+    let host = after.split('/').next().unwrap_or("").trim_start_matches("www.");
+    let parts: Vec<&str> = host.split('.').filter(|p| !p.is_empty()).collect();
+    if parts.len() >= 2 {
+        Some(parts[parts.len() - 2].to_string())
+    } else {
+        None
+    }
 }
 
 /// Read a single `Field: value` line from a pip dist-info METADATA body.
@@ -149,7 +172,13 @@ mod tests {
             publisher_from_homepage("https://gitlab.com/foo/bar").as_deref(),
             Some("foo")
         );
-        assert_eq!(publisher_from_homepage("https://example.com/whatever"), None);
+        // non-git homepage falls back to the second-level domain label
+        assert_eq!(
+            publisher_from_homepage("https://www.openssl.org/").as_deref(),
+            Some("openssl")
+        );
+        assert_eq!(publisher_from_homepage("https://gnu.org/software/wget/").as_deref(), Some("gnu"));
+        assert_eq!(publisher_from_homepage("not a url"), None);
     }
 
     #[test]
@@ -159,6 +188,19 @@ mod tests {
         assert_eq!(author_from_metadata("Author: UNKNOWN\n"), None);
         assert_eq!(author_from_metadata("Author:   \n"), None);
         assert_eq!(author_from_metadata("Name: x\n"), None);
+    }
+
+    #[test]
+    fn pip_author_falls_back_to_author_email_name() {
+        // modern packaging: Author blank, name lives in Author-email
+        let md = "Name: ruff\nAuthor-email: Charlie Marsh <charlie@astral.sh>\n";
+        assert_eq!(pip_author(md).as_deref(), Some("Charlie Marsh"));
+        // a bare email with no name is not a usable handle
+        let md2 = "Author-email: noreply@example.com\n";
+        assert_eq!(pip_author(md2), None);
+        // explicit Author wins over Author-email
+        let md3 = "Author: Pallets\nAuthor-email: someone <x@y.com>\n";
+        assert_eq!(pip_author(md3).as_deref(), Some("Pallets"));
     }
 
     #[test]
