@@ -64,6 +64,7 @@ pub fn parse_pip(list_json: &str, outdated_json: &str) -> Vec<InstalledTool> {
             latest,
             size: String::new(),
             pinned: false,
+            publisher: String::new(),
         })
         .collect()
 }
@@ -83,7 +84,40 @@ fn pip_bin() -> Option<&'static str> {
     None
 }
 
-/// Run the real pip commands and merge. Returns empty if no pip is installed.
+/// Map lowercased package name -> publisher handle, by scanning every
+/// `*.dist-info/METADATA` in python's site-packages directories for `Author`.
+fn pip_publishers() -> BTreeMap<String, String> {
+    let mut map = BTreeMap::new();
+    let listing = super::run(
+        "python3",
+        &["-c", "import site; print('\\n'.join(site.getsitepackages()))"],
+    );
+    for dir in listing.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            if !entry.file_name().to_string_lossy().ends_with(".dist-info") {
+                continue;
+            }
+            let metadata = match std::fs::read_to_string(entry.path().join("METADATA")) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let name = super::publisher::metadata_field(&metadata, "Name");
+            let author = super::publisher::author_from_metadata(&metadata)
+                .and_then(|a| super::publisher::to_handle(&a));
+            if let (Some(n), Some(a)) = (name, author) {
+                map.insert(n.to_lowercase(), a);
+            }
+        }
+    }
+    map
+}
+
+/// Run the real pip commands and merge, then enrich publishers from the
+/// installed dist-info METADATA. Returns empty if no pip is installed.
 pub fn scan_pip() -> Vec<InstalledTool> {
     let bin = match pip_bin() {
         Some(b) => b,
@@ -91,7 +125,14 @@ pub fn scan_pip() -> Vec<InstalledTool> {
     };
     let list = super::run(bin, &["list", "--format=json"]);
     let outdated = super::run(bin, &["list", "--outdated", "--format=json"]);
-    parse_pip(&list, &outdated)
+    let mut rows = parse_pip(&list, &outdated);
+    let pubs = pip_publishers();
+    for row in rows.iter_mut() {
+        if let Some(p) = pubs.get(&row.pkg.to_lowercase()) {
+            row.publisher = p.clone();
+        }
+    }
+    rows
 }
 
 #[cfg(test)]

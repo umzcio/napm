@@ -5,6 +5,7 @@ pub mod npm;
 pub mod brew;
 pub mod pip;
 pub mod npx;
+pub mod publisher;
 
 /// One row in the Shared Library. Mirrors the prototype's tool shape.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -16,6 +17,9 @@ pub struct InstalledTool {
     pub latest: String,
     pub size: String,
     pub pinned: bool,
+    /// Real package publisher as a lowercase handle (e.g. "anthropic"), or ""
+    /// when the local metadata has no author. Rendered as the "Shared By" column.
+    pub publisher: String,
 }
 
 /// Run a command and return its stdout, ignoring exit status (some tools, like

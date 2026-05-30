@@ -12,23 +12,26 @@ pub fn npx_pkg_name(spec: &str) -> &str {
     }
 }
 
-/// Collapse (name, version) pairs into library rows, deduping by name and
-/// keeping the greatest version string. latest is set equal to installed: in
-/// M2 napm does not know the registry latest for npx tools, so this is a
-/// neutral sentinel meaning "freshness unknown" (rendered as such in the UI).
-pub fn dedup_npx(items: Vec<(String, String)>) -> Vec<InstalledTool> {
-    let mut map: BTreeMap<String, String> = BTreeMap::new();
-    for (name, ver) in items {
+/// Collapse (name, version, publisher) triples into library rows, deduping by
+/// name and keeping the greatest version string (and that version's publisher).
+/// latest is set equal to installed: in M2 napm does not know the registry
+/// latest for npx tools, so this is a neutral sentinel meaning "freshness
+/// unknown" (rendered as such in the UI).
+pub fn dedup_npx(items: Vec<(String, String, String)>) -> Vec<InstalledTool> {
+    // name -> (version, publisher)
+    let mut map: BTreeMap<String, (String, String)> = BTreeMap::new();
+    for (name, ver, publisher) in items {
         map.entry(name)
-            .and_modify(|v| {
-                if ver > *v {
-                    *v = ver.clone();
+            .and_modify(|e| {
+                if ver > e.0 {
+                    e.0 = ver.clone();
+                    e.1 = publisher.clone();
                 }
             })
-            .or_insert(ver);
+            .or_insert((ver, publisher));
     }
     map.into_iter()
-        .map(|(name, ver)| InstalledTool {
+        .map(|(name, (ver, publisher))| InstalledTool {
             name: name.clone(),
             eco: "npx".to_string(),
             pkg: name,
@@ -36,6 +39,7 @@ pub fn dedup_npx(items: Vec<(String, String)>) -> Vec<InstalledTool> {
             latest: ver,
             size: String::new(),
             pinned: false,
+            publisher,
         })
         .collect()
 }
@@ -54,7 +58,7 @@ pub fn scan_npx() -> Vec<InstalledTool> {
         Err(_) => return Vec::new(),
     };
 
-    let mut items: Vec<(String, String)> = Vec::new();
+    let mut items: Vec<(String, String, String)> = Vec::new();
     for entry in entries.flatten() {
         let dir = entry.path();
         let shim = match fs::read_to_string(dir.join("package.json")) {
@@ -79,7 +83,12 @@ pub fn scan_npx() -> Vec<InstalledTool> {
             if let Ok(s) = fs::read_to_string(&pkg_json) {
                 if let Ok(v) = serde_json::from_str::<Value>(&s) {
                     if let Some(ver) = v.get("version").and_then(|x| x.as_str()) {
-                        items.push((name.to_string(), ver.to_string()));
+                        let publisher = v
+                            .get("author")
+                            .and_then(super::publisher::author_from_pkg_json)
+                            .and_then(|n| super::publisher::to_handle(&n))
+                            .unwrap_or_default();
+                        items.push((name.to_string(), ver.to_string(), publisher));
                     }
                 }
             }
@@ -112,14 +121,15 @@ mod tests {
     #[test]
     fn dedup_keeps_greatest_version_and_tags_npx() {
         let rows = dedup_npx(vec![
-            ("tool".to_string(), "1.0.0".to_string()),
-            ("tool".to_string(), "1.2.0".to_string()),
-            ("other".to_string(), "0.1.0".to_string()),
+            ("tool".to_string(), "1.0.0".to_string(), "alice".to_string()),
+            ("tool".to_string(), "1.2.0".to_string(), "bob".to_string()),
+            ("other".to_string(), "0.1.0".to_string(), "carol".to_string()),
         ]);
         assert_eq!(rows.len(), 2);
         let tool = rows.iter().find(|t| t.pkg == "tool").unwrap();
         assert_eq!(tool.eco, "npx");
         assert_eq!(tool.installed.as_deref(), Some("1.2.0"));
         assert_eq!(tool.latest, "1.2.0");
+        assert_eq!(tool.publisher, "bob"); // publisher of the chosen (greatest) version
     }
 }

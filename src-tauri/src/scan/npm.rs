@@ -54,6 +54,7 @@ pub fn parse_npm(ls_json: &str, outdated_json: &str) -> Vec<InstalledTool> {
             latest,
             size: String::new(),
             pinned: false,
+            publisher: String::new(),
         })
         .collect()
 }
@@ -63,7 +64,35 @@ pub fn parse_npm(ls_json: &str, outdated_json: &str) -> Vec<InstalledTool> {
 pub fn scan_npm() -> Vec<InstalledTool> {
     let ls = super::run("npm", &["ls", "-g", "--depth=0", "--json"]);
     let outdated = super::run("npm", &["outdated", "-g", "--json"]);
-    parse_npm(&ls, &outdated)
+    let mut rows = parse_npm(&ls, &outdated);
+    enrich_publishers(&mut rows);
+    rows
+}
+
+/// Fill in each row's `publisher` from the installed package's package.json
+/// `author`, read out of the global npm root. Best-effort: unreadable or
+/// authorless packages keep an empty publisher.
+fn enrich_publishers(rows: &mut [InstalledTool]) {
+    let root = super::run("npm", &["root", "-g"]);
+    let root = root.trim();
+    if root.is_empty() {
+        return;
+    }
+    let base = std::path::Path::new(root);
+    for row in rows.iter_mut() {
+        let pkg_json = base.join(&row.pkg).join("package.json");
+        if let Ok(s) = std::fs::read_to_string(&pkg_json) {
+            if let Ok(v) = serde_json::from_str::<Value>(&s) {
+                if let Some(p) = v
+                    .get("author")
+                    .and_then(super::publisher::author_from_pkg_json)
+                    .and_then(|n| super::publisher::to_handle(&n))
+                {
+                    row.publisher = p;
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
