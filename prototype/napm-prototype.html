@@ -474,12 +474,12 @@
 
   function scanLibrary(){
     var inv = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
-    if(!inv){ renderRows(); renderStatus(); return; }
+    if(!inv){ renderRows(); renderFeed(); renderStatus(); return; }
     inv("scan_installed").then(function(tools){
       TOOLS = tools || [];
       TOOLS.forEach(function(t){ if(!t.user) t.user = handleFor(t.name); });
       renderRows(); renderFeed(); renderStatus();
-    }).catch(function(e){ console.error("scan_installed failed", e); renderRows(); renderStatus(); });
+    }).catch(function(e){ console.error("scan_installed failed", e); renderRows(); renderFeed(); renderStatus(); });
   }
   renderXfers(); renderHistory(); runSearch(""); nextStep(); scanLibrary();
 })();
