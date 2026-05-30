@@ -237,15 +237,7 @@
   "use strict";
 
   // ---- INSTALLED PACKAGES (your Shared Library) --------------------------
-  var TOOLS = [
-    {name:"Claude Code", eco:"npm",  pkg:"@anthropic-ai/claude-code", installed:"1.2.3",  latest:"1.4.0",  size:"38 MB", user:"anthr0pic_official", pinned:false},
-    {name:"Gemini CLI",  eco:"npm",  pkg:"@google/gemini-cli",        installed:"0.9.1",  latest:"0.9.1",  size:"22 MB", user:"g00gle_guy_2001",   pinned:false},
-    {name:"Codex CLI",   eco:"npm",  pkg:"@openai/codex",             installed:"0.21.0", latest:"0.24.2", size:"31 MB", user:"uncle_sam_altman",  pinned:false},
-    {name:"TypeScript",  eco:"npm",  pkg:"typescript",                installed:"5.5.4",  latest:"5.6.2",  size:"9 MB",  user:"type_daddy",        pinned:false},
-    {name:"Vercel",      eco:"npm",  pkg:"vercel",                    installed:null,     latest:"39.1.0", size:"54 MB", user:"edge_lord_69",      pinned:false},
-    {name:"ripgrep",     eco:"brew", pkg:"ripgrep",                   installed:"14.1.0", latest:"14.1.1", size:"4 MB",  user:"blazng_fast",       pinned:false},
-    {name:"httpie",      eco:"pip",  pkg:"httpie",                    installed:"3.2.2",  latest:"3.2.2",  size:"2 MB",  user:"http_head",         pinned:false}
-  ];
+  var TOOLS = [];
 
   // ---- THE SWARM (registry search index) ---------------------------------
   // Real app: npm -> registry.npmjs.org/-/v1/search, brew -> formulae.brew.sh
@@ -274,25 +266,7 @@
     {name:"uv",           eco:"pip",  pkg:"uv",                        version:"0.4.10",  dl:7700000,  size:"15 MB", desc:"Fast Python package installer"}
   ];
 
-  var FEED=[
-    {ti:2, age:"released 18 hours ago", rec:"hold",
-     blurb:"Major release and very fresh. Worth letting it settle before you take it.",
-     changelog:["Rewrote the local sandbox executor","BREAKING: config moved to ~/.codex/config.toml","New --yolo autonomy flag"],
-     signals:[{c:"danger",lbl:"Adoption",txt:"14 new issues filed since release, several about the config change"},
-              {c:"warn",lbl:"Breaking",txt:"existing config files need migration"}]},
-    {ti:0, age:"released 6 days ago", rec:"safe",
-     blurb:"Out about a week with a clean signal. Safe to take.",
-     changelog:["Added /agents subcommand","Faster project file search","Fixes MCP server reconnect loop"],
-     signals:[{c:"good",lbl:"Adoption",txt:"installs climbing, issue rate flat"},{c:"good",lbl:"Security",txt:"no known advisories"}]},
-    {ti:3, age:"released 21 days ago", rec:"security",
-     blurb:"Patch release. Recommended because it closes a security advisory.",
-     changelog:["Region-prioritized diagnostics","Patches a bundled dependency"],
-     signals:[{c:"danger",lbl:"Advisory",txt:"GHSA-4q6r ReDoS in a bundled dependency, fixed in this patch"},{c:"good",lbl:"Adoption",txt:"widely deployed, settled"}]},
-    {ti:5, age:"released 5 weeks ago", rec:"safe",
-     blurb:"Small patch, long settled.",
-     changelog:["Fix panic with --hyperlink-format","Minor multiline perf"],
-     signals:[{c:"good",lbl:"Adoption",txt:"stable, no open regressions"}]}
-  ];
+  var FEED=[];
   var REC={safe:["✓ Safe to take","safe"],hold:["⚠ Hold for now","hold"],security:["🛡 Update (security)","security"]};
   var HANDLES=["npstr_user_2001","l33t_w4rez","fast_pipe_99","t0tally_legit","dialup_dan","cd_burner","kazaa_refugee"];
 
@@ -498,7 +472,16 @@
   function nextStep(){ if(si>=steps.length){ setTimeout(function(){splash.style.transition="opacity .3s";splash.style.opacity="0";setTimeout(function(){splash.style.display="none";},320);},450); return; }
     sBody.innerHTML=steps.slice(0,si+1).join('<br>'); si++; setTimeout(nextStep,560); }
 
-  renderRows(); renderFeed(); renderXfers(); renderHistory(); runSearch(""); nextStep();
+  function scanLibrary(){
+    var inv = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
+    if(!inv){ renderRows(); renderStatus(); return; }
+    inv("scan_installed").then(function(tools){
+      TOOLS = tools || [];
+      TOOLS.forEach(function(t){ if(!t.user) t.user = handleFor(t.name); });
+      renderRows(); renderFeed(); renderStatus();
+    }).catch(function(e){ console.error("scan_installed failed", e); renderRows(); renderStatus(); });
+  }
+  renderXfers(); renderHistory(); runSearch(""); nextStep(); scanLibrary();
 })();
 </script>
 </body>
