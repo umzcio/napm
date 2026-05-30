@@ -18,15 +18,14 @@
   }
   *{box-sizing:border-box;}
   html,body{height:100%;margin:0;}
-  body{background:radial-gradient(circle at 30% 20%, #4aa0a0 0%, var(--teal) 60%, #2c6b6b 100%);
-    font-family:var(--ui); font-size:12px; color:#000;
-    display:flex; align-items:center; justify-content:center; overflow:hidden;}
+  body{background:var(--face);
+    font-family:var(--ui); font-size:12px; color:#000; overflow:hidden;}
   .raised{box-shadow:inset -1px -1px #0a0a0a, inset 1px 1px var(--white),
           inset -2px -2px var(--dgray), inset 2px 2px var(--lgray);}
   .sunken{box-shadow:inset -1px -1px var(--white), inset 1px 1px #0a0a0a,
           inset -2px -2px var(--lgray), inset 2px 2px var(--dgray);}
 
-  .window{width:840px; max-width:96vw; height:590px; max-height:95vh;
+  .window{width:100%; height:100%;
     background:var(--face); padding:3px; display:flex; flex-direction:column;}
   .titlebar{background:linear-gradient(90deg,var(--navy),var(--navy2)); color:#fff;
     padding:3px 3px 3px 4px; display:flex; align-items:center; gap:6px;
@@ -164,11 +163,11 @@
 <body>
 
 <div class="window raised" id="win">
-  <div class="titlebar" id="titlebar">
-    <img class="brand" src="npstr-logo.svg" alt="npstr"><span class="logo">napm</span>
-    <span class="title">- npstr AI Package Manager [Shared Library]</span>
-    <span class="spacer"></span>
-    <span class="tb-btn">_</span><span class="tb-btn">▢</span><span class="tb-btn">✕</span>
+  <div class="titlebar" id="titlebar" data-tauri-drag-region>
+    <img class="brand" src="npstr-logo.svg" alt="npstr" data-tauri-drag-region><span class="logo" data-tauri-drag-region>napm</span>
+    <span class="title" data-tauri-drag-region>- npstr AI Package Manager [Shared Library]</span>
+    <span class="spacer" data-tauri-drag-region></span>
+    <span class="tb-btn" id="tb-min" title="Minimize">_</span><span class="tb-btn" id="tb-max" title="Maximize">▢</span><span class="tb-btn" id="tb-close" title="Close">✕</span>
   </div>
 
   <div class="menubar">
@@ -461,10 +460,18 @@
   }
   document.querySelectorAll(".tab").forEach(function(t){ t.addEventListener("click",function(){ if(t.dataset.view==="search") runSearch(lastQuery); else switchTab(t.dataset.view); }); });
 
-  (function(){ var win=document.getElementById("win"),bar=document.getElementById("titlebar"),dx=0,dy=0,drag=false;
-    bar.addEventListener("mousedown",function(e){drag=true;var r=win.getBoundingClientRect();dx=e.clientX-r.left;dy=e.clientY-r.top;win.style.position="fixed";win.style.margin="0";});
-    window.addEventListener("mousemove",function(e){if(!drag)return;win.style.left=(e.clientX-dx)+"px";win.style.top=(e.clientY-dy)+"px";});
-    window.addEventListener("mouseup",function(){drag=false;}); })();
+  // Window controls: the OS window is frameless, so the Win98 titlebar IS the
+  // titlebar. Dragging is handled natively via data-tauri-drag-region; here we
+  // wire the [_ ▢ ✕] buttons to real minimize / maximize / close.
+  (function(){
+    var W = window.__TAURI__ && window.__TAURI__.window;
+    if(!W) return; // plain browser: buttons stay inert
+    var appWindow = W.getCurrentWindow();
+    var on = function(id, fn){ var el=document.getElementById(id); if(el) el.addEventListener("click", fn); };
+    on("tb-min",   function(){ appWindow.minimize(); });
+    on("tb-max",   function(){ appWindow.toggleMaximize(); });
+    on("tb-close", function(){ appWindow.close(); });
+  })();
 
   var splash=document.getElementById("splash"),sBody=document.getElementById("splashBody");
   var steps=['Dialing registry.npmjs.org','<span class="ok">connected.</span><br>Scanning npm globals',
