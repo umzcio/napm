@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>napm v0.9b - npstr AI Package Manager</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --silver:#c0c0c0; --navy:#000080; --navy2:#1084d0;
+    --white:#fff; --dgray:#808080; --ddgray:#404040; --lgray:#dfdfdf;
+    --teal:#3a8a8a; --green:#00880c; --amber:#b07d00; --red:#aa0000;
+    --sel:#000080; --face:#c0c0c0;
+    --npm:#cb3837; --brew:#d07000; --pip:#2f6690;
+    --ui:"Tahoma","Geneva",sans-serif; --mono:"VT323",monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;}
+  body{background:radial-gradient(circle at 30% 20%, #4aa0a0 0%, var(--teal) 60%, #2c6b6b 100%);
+    font-family:var(--ui); font-size:12px; color:#000;
+    display:flex; align-items:center; justify-content:center; overflow:hidden;}
+  .raised{box-shadow:inset -1px -1px #0a0a0a, inset 1px 1px var(--white),
+          inset -2px -2px var(--dgray), inset 2px 2px var(--lgray);}
+  .sunken{box-shadow:inset -1px -1px var(--white), inset 1px 1px #0a0a0a,
+          inset -2px -2px var(--lgray), inset 2px 2px var(--dgray);}
+
+  .window{width:840px; max-width:96vw; height:590px; max-height:95vh;
+    background:var(--face); padding:3px; display:flex; flex-direction:column;}
+  .titlebar{background:linear-gradient(90deg,var(--navy),var(--navy2)); color:#fff;
+    padding:3px 3px 3px 4px; display:flex; align-items:center; gap:6px;
+    user-select:none; flex:0 0 auto; cursor:default;}
+  .titlebar .logo{font-family:var(--mono); font-size:20px; line-height:1;
+    color:#7CFC00; text-shadow:1px 1px 0 #003300; letter-spacing:1px;}
+  .titlebar .title{font-weight:bold; font-size:11px;}
+  .titlebar .spacer{flex:1;}
+  .tb-btn{width:16px; height:14px; background:var(--face); display:flex;
+    align-items:center; justify-content:center; font-size:10px; font-weight:bold; cursor:pointer;
+    box-shadow:inset -1px -1px #0a0a0a, inset 1px 1px var(--white),
+               inset -2px -2px var(--dgray), inset 2px 2px var(--lgray);}
+
+  .menubar{display:flex; gap:2px; padding:2px 1px; flex:0 0 auto;}
+  .menubar span{padding:2px 7px; cursor:default;}
+  .menubar span:hover{background:var(--navy); color:#fff;}
+  .menubar u{text-decoration:underline;}
+
+  .toolbar{display:flex; align-items:center; gap:5px; padding:4px 5px;
+    border-top:1px solid var(--white); border-bottom:1px solid var(--dgray); flex:0 0 auto;}
+  .search{flex:1; height:20px; padding:2px 5px; background:#fff; border:none;
+    font-family:var(--ui); font-size:12px;}
+  .btn{min-width:70px; height:23px; background:var(--face); border:none; cursor:pointer;
+    font-family:var(--ui); font-size:12px; padding:0 8px;
+    box-shadow:inset -1px -1px #0a0a0a, inset 1px 1px var(--white),
+               inset -2px -2px var(--dgray), inset 2px 2px var(--lgray);}
+  .btn:active{box-shadow:inset -1px -1px var(--white), inset 1px 1px #0a0a0a,
+               inset -2px -2px var(--lgray), inset 2px 2px var(--dgray); padding:1px 7px 0 9px;}
+  .btn.primary{font-weight:bold;}
+  .btn:disabled{color:var(--dgray); text-shadow:1px 1px var(--white); cursor:default;}
+
+  .tabs{display:flex; padding:5px 5px 0 5px; flex:0 0 auto;}
+  .tab{padding:4px 12px 5px; background:var(--face); cursor:pointer;
+    border-top:1px solid var(--white); border-left:1px solid var(--white);
+    border-right:1px solid var(--ddgray); margin-bottom:-1px;
+    border-top-left-radius:3px; border-top-right-radius:3px;}
+  .tab.active{font-weight:bold; padding-top:6px; z-index:2; border-bottom:1px solid var(--face);}
+  .tab:not(.active){margin-top:2px;}
+  .tab .badge{background:var(--red); color:#fff; font-size:10px; font-weight:bold;
+    border-radius:7px; padding:0 5px; margin-left:5px;}
+
+  .panel{flex:1 1 auto; margin:0 5px; background:#fff; overflow:auto; position:relative;}
+  .view{display:none; height:100%;}
+  .view.active{display:block;}
+
+  table{border-collapse:collapse; width:100%; font-size:12px;}
+  thead th{position:sticky; top:0; background:var(--face); text-align:left;
+    padding:3px 8px; font-weight:normal; cursor:default;
+    box-shadow:inset -1px -1px var(--dgray), inset 1px 1px var(--white); z-index:1;}
+  tbody td{padding:3px 8px; white-space:nowrap; vertical-align:top;}
+  tbody tr:hover{background:#e8e8f8;}
+  tbody tr.sel{background:var(--sel); color:#fff;}
+  tbody tr.sel .muted{color:#cfcfe8;}
+  .muted{color:var(--dgray);}
+  .glyph{font-family:var(--mono); font-size:16px; width:18px; text-align:center;}
+  .g-up{color:var(--amber);} .g-ok{color:var(--green);} .g-off{color:var(--dgray);}
+  tr.sel .g-up,tr.sel .g-ok,tr.sel .g-off{color:#fff;}
+  .user{font-family:var(--mono); font-size:15px;}
+  .vernew{font-weight:bold; color:var(--green);}
+  tr.sel .vernew{color:#9cff9c;}
+  .rowbtn{font-size:11px; padding:1px 7px; height:18px; min-width:0; margin-left:3px;}
+  .pin{cursor:pointer; font-size:13px; filter:grayscale(1) opacity(.4); user-select:none;}
+  .pin.on{filter:none;}
+
+  /* source pills */
+  .src{font-family:var(--ui); font-size:10px; font-weight:bold; color:#fff;
+    padding:1px 6px; border-radius:2px;}
+  .src.npm{background:var(--npm);} .src.brew{background:var(--brew);} .src.pip{background:var(--pip);}
+
+  /* search results */
+  .pkgcell{white-space:normal; max-width:330px;}
+  .pkgcell .desc{display:block; color:var(--dgray); font-size:11px; margin-top:1px;}
+  .dl{font-family:var(--mono); font-size:15px;}
+  .fire{color:var(--red);}
+  .searching{padding:26px; text-align:center; color:var(--dgray); font-family:var(--mono); font-size:16px;}
+  .hint{display:block; font-family:var(--ui); font-size:11px; margin-top:6px;}
+
+  /* transfers */
+  .section-h{background:var(--face); padding:4px 8px; font-weight:bold;
+    box-shadow:inset -1px -1px var(--dgray), inset 1px 1px var(--white);}
+  .xfer{padding:6px;}
+  .xfer-row{padding:6px; margin-bottom:5px; background:var(--face);}
+  .xfer-top{display:flex; align-items:center; gap:8px;}
+  .xfer-top .name{width:150px; font-weight:bold; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .xfer-top .from{flex:1; font-family:var(--mono); font-size:14px; color:var(--navy);}
+  .xfer-top .kbps{width:78px; text-align:right; font-family:var(--mono); font-size:14px; color:var(--dgray);}
+  .cmd{font-family:var(--mono); font-size:14px; color:var(--ddgray); margin:3px 0 5px;}
+  .pbar{height:16px; background:#fff; position:relative; overflow:hidden;}
+  .pbar .fill{height:100%; width:0; background-color:var(--navy);
+    background-image:repeating-linear-gradient(90deg,transparent 0 9px, rgba(255,255,255,.25) 9px 11px);
+    transition:width .15s linear;}
+  .pbar .pct{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:11px;}
+  .empty{padding:24px; text-align:center; color:var(--dgray);}
+  .hist td{padding:4px 8px; border-bottom:1px solid #eee; white-space:nowrap;}
+  .hist .t{font-family:var(--mono); font-size:14px; color:var(--dgray); width:78px;}
+  .act-update{color:var(--green);} .act-rollback{color:var(--amber);} .act-install{color:var(--navy);}
+
+  /* what's new */
+  .feed{padding:6px;}
+  .card{background:var(--face); margin-bottom:6px;}
+  .card-h{display:flex; align-items:center; gap:8px; padding:7px 9px; cursor:pointer;}
+  .card-h .caret{font-family:var(--mono); width:12px; color:var(--dgray);}
+  .card-h .nm{font-weight:bold;}
+  .card-h .ver{font-family:var(--mono); font-size:15px; color:var(--green);}
+  .card-h .age{flex:1; color:var(--dgray); font-size:11px;}
+  .rec{font-size:11px; font-weight:bold; padding:2px 8px; border-radius:2px;}
+  .rec.safe{background:#d6f0d6; color:var(--green);}
+  .rec.hold{background:#f6e7c2; color:var(--amber);}
+  .rec.security{background:#f3cccc; color:var(--red);}
+  .card-b{display:none; padding:2px 12px 11px 34px; font-size:12px; line-height:1.55;}
+  .card.open .card-b{display:block;}
+  .card-b ul{margin:5px 0 8px; padding-left:16px;}
+  .signal{margin:5px 0; padding:5px 8px; background:#fff; border-left:3px solid var(--dgray);}
+  .signal.warn{border-color:var(--amber);} .signal.danger{border-color:var(--red);} .signal.good{border-color:var(--green);}
+  .signal .lbl{font-weight:bold;}
+
+  .statusbar{display:flex; align-items:center; padding:3px 0 0; flex:0 0 auto;}
+  .sb{padding:3px 7px; margin-right:3px; box-shadow:inset -1px -1px var(--white), inset 1px 1px var(--dgray);}
+  .sb.grow{flex:1;}
+  .dot{color:var(--green);}
+  .slider{display:flex; align-items:center; gap:5px;}
+  .slider input{width:84px;}
+
+  .splash{position:absolute; inset:0; background:rgba(0,0,0,.35);
+    display:flex; align-items:center; justify-content:center; z-index:50;}
+  .splash .box{width:360px; background:var(--face); padding:3px;}
+  .splash .bar{background:linear-gradient(90deg,var(--navy),var(--navy2)); color:#fff;
+    padding:3px 5px; font-weight:bold; display:flex; align-items:center; gap:6px;}
+  .splash .body{padding:14px; font-family:var(--mono); font-size:15px; line-height:1.5;}
+  .splash .body .ok{color:var(--green);}
+  .cat{font-size:18px;}
+</style>
+</head>
+<body>
+
+<div class="window raised" id="win">
+  <div class="titlebar" id="titlebar">
+    <span class="cat">🐱</span><span class="logo">napm</span>
+    <span class="title">- npstr AI Package Manager [Shared Library]</span>
+    <span class="spacer"></span>
+    <span class="tb-btn">_</span><span class="tb-btn">▢</span><span class="tb-btn">✕</span>
+  </div>
+
+  <div class="menubar">
+    <span><u>F</u>ile</span><span><u>E</u>dit</span><span><u>V</u>iew</span>
+    <span><u>S</u>warm</span><span><u>H</u>elp</span>
+  </div>
+
+  <div class="toolbar">
+    <label>🔍</label>
+    <input class="search" id="search" placeholder="search the swarm for packages to download...">
+    <button class="btn primary" id="searchBtn">Search</button>
+    <button class="btn" id="updateAll">Update All</button>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" data-view="library">Shared Library</div>
+    <div class="tab" data-view="search">Search</div>
+    <div class="tab" data-view="whatsnew">What's New <span class="badge" id="newBadge">0</span></div>
+    <div class="tab" data-view="transfers">Transfers <span class="badge" id="xferBadge" style="display:none">0</span></div>
+  </div>
+
+  <div class="panel" id="panel">
+    <!-- LIBRARY -->
+    <div class="view active" data-view="library">
+      <table>
+        <thead><tr>
+          <th></th><th>Tool</th><th>Installed</th><th>Latest</th>
+          <th>Shared By</th><th>Size</th><th>Ping</th><th>Pin</th><th></th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <!-- SEARCH -->
+    <div class="view" data-view="search">
+      <div id="searchResults"></div>
+    </div>
+    <!-- WHAT'S NEW -->
+    <div class="view" data-view="whatsnew"><div class="feed" id="feed"></div></div>
+    <!-- TRANSFERS -->
+    <div class="view" data-view="transfers">
+      <div class="section-h">Active</div>
+      <div class="xfer" id="xferList"><div class="empty">Nothing transferring.</div></div>
+      <div class="section-h">History</div>
+      <div id="histWrap"><div class="empty">No version changes yet.</div></div>
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <div class="sb"><span class="dot">●</span> Connected</div>
+    <div class="sb" id="sbInstalled">0 installed</div>
+    <div class="sb grow" id="sbState">tracking 0 packages</div>
+    <div class="sb slider" title="purely decorative, like it always was">
+      ⇅ <input type="range" min="0" max="100" value="56"> 56k
+    </div>
+  </div>
+
+  <div class="splash" id="splash">
+    <div class="box raised">
+      <div class="bar"><span class="cat">🐱</span> Connecting to napm</div>
+      <div class="body" id="splashBody">Dialing registry.npmjs.org</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---- INSTALLED PACKAGES (your Shared Library) --------------------------
+  var TOOLS = [
+    {name:"Claude Code", eco:"npm",  pkg:"@anthropic-ai/claude-code", installed:"1.2.3",  latest:"1.4.0",  size:"38 MB", user:"anthr0pic_official", pinned:false},
+    {name:"Gemini CLI",  eco:"npm",  pkg:"@google/gemini-cli",        installed:"0.9.1",  latest:"0.9.1",  size:"22 MB", user:"g00gle_guy_2001",   pinned:false},
+    {name:"Codex CLI",   eco:"npm",  pkg:"@openai/codex",             installed:"0.21.0", latest:"0.24.2", size:"31 MB", user:"uncle_sam_altman",  pinned:false},
+    {name:"TypeScript",  eco:"npm",  pkg:"typescript",                installed:"5.5.4",  latest:"5.6.2",  size:"9 MB",  user:"type_daddy",        pinned:false},
+    {name:"Vercel",      eco:"npm",  pkg:"vercel",                    installed:null,     latest:"39.1.0", size:"54 MB", user:"edge_lord_69",      pinned:false},
+    {name:"ripgrep",     eco:"brew", pkg:"ripgrep",                   installed:"14.1.0", latest:"14.1.1", size:"4 MB",  user:"blazng_fast",       pinned:false},
+    {name:"httpie",      eco:"pip",  pkg:"httpie",                    installed:"3.2.2",  latest:"3.2.2",  size:"2 MB",  user:"http_head",         pinned:false}
+  ];
+
+  // ---- THE SWARM (registry search index) ---------------------------------
+  // Real app: npm -> registry.npmjs.org/-/v1/search, brew -> formulae.brew.sh
+  // index, pip -> a PyPI mirror (no native search API anymore).
+  var SWARM = [
+    {name:"eslint",       eco:"npm",  pkg:"eslint",                    version:"9.10.0",  dl:32000000, size:"3 MB",  desc:"Pluggable JavaScript linter"},
+    {name:"prettier",     eco:"npm",  pkg:"prettier",                  version:"3.3.3",   dl:28000000, size:"8 MB",  desc:"Opinionated code formatter"},
+    {name:"TypeScript",   eco:"npm",  pkg:"typescript",                version:"5.6.2",   dl:62000000, size:"9 MB",  desc:"Typed superset of JavaScript"},
+    {name:"vite",         eco:"npm",  pkg:"vite",                      version:"5.4.6",   dl:18000000, size:"21 MB", desc:"Next-gen frontend build tool"},
+    {name:"tsx",          eco:"npm",  pkg:"tsx",                       version:"4.19.1",  dl:6500000,  size:"14 MB", desc:"Run TypeScript directly with esbuild"},
+    {name:"nodemon",      eco:"npm",  pkg:"nodemon",                   version:"3.1.4",   dl:5200000,  size:"3 MB",  desc:"Auto-restart node on file change"},
+    {name:"npm-check-updates",eco:"npm",pkg:"npm-check-updates",       version:"17.1.1",  dl:2100000,  size:"6 MB",  desc:"Upgrade package.json dependencies"},
+    {name:"wrangler",     eco:"npm",  pkg:"wrangler",                  version:"3.78.0",  dl:900000,   size:"40 MB", desc:"Cloudflare Workers CLI"},
+    {name:"Claude Code",  eco:"npm",  pkg:"@anthropic-ai/claude-code", version:"1.4.0",   dl:1400000,  size:"38 MB", desc:"Agentic coding tool in your terminal"},
+    {name:"Codex CLI",    eco:"npm",  pkg:"@openai/codex",             version:"0.24.2",  dl:780000,   size:"31 MB", desc:"OpenAI coding agent CLI"},
+    {name:"Gemini CLI",   eco:"npm",  pkg:"@google/gemini-cli",        version:"0.9.1",   dl:610000,   size:"22 MB", desc:"Google Gemini coding agent CLI"},
+    {name:"ripgrep",      eco:"brew", pkg:"ripgrep",                   version:"14.1.1",  dl:4200000,  size:"4 MB",  desc:"Recursive search, faster than grep"},
+    {name:"fd",           eco:"brew", pkg:"fd",                        version:"10.2.0",  dl:2600000,  size:"3 MB",  desc:"Simple, fast alternative to find"},
+    {name:"bat",          eco:"brew", pkg:"bat",                       version:"0.24.0",  dl:3100000,  size:"5 MB",  desc:"cat clone with syntax highlighting"},
+    {name:"fzf",          eco:"brew", pkg:"fzf",                       version:"0.55.0",  dl:5400000,  size:"4 MB",  desc:"Command-line fuzzy finder"},
+    {name:"jq",           eco:"brew", pkg:"jq",                        version:"1.7.1",   dl:8900000,  size:"1 MB",  desc:"Command-line JSON processor"},
+    {name:"gh",           eco:"brew", pkg:"gh",                        version:"2.57.0",  dl:6100000,  size:"30 MB", desc:"GitHub on the command line"},
+    {name:"lazygit",      eco:"brew", pkg:"lazygit",                   version:"0.44.1",  dl:1900000,  size:"18 MB", desc:"Terminal UI for git"},
+    {name:"httpie",       eco:"pip",  pkg:"httpie",                    version:"3.2.2",   dl:1200000,  size:"2 MB",  desc:"Human-friendly HTTP client"},
+    {name:"ruff",         eco:"pip",  pkg:"ruff",                      version:"0.6.5",   dl:9800000,  size:"12 MB", desc:"Extremely fast Python linter"},
+    {name:"uv",           eco:"pip",  pkg:"uv",                        version:"0.4.10",  dl:7700000,  size:"15 MB", desc:"Fast Python package installer"}
+  ];
+
+  var FEED=[
+    {ti:2, age:"released 18 hours ago", rec:"hold",
+     blurb:"Major release and very fresh. Worth letting it settle before you take it.",
+     changelog:["Rewrote the local sandbox executor","BREAKING: config moved to ~/.codex/config.toml","New --yolo autonomy flag"],
+     signals:[{c:"danger",lbl:"Adoption",txt:"14 new issues filed since release, several about the config change"},
+              {c:"warn",lbl:"Breaking",txt:"existing config files need migration"}]},
+    {ti:0, age:"released 6 days ago", rec:"safe",
+     blurb:"Out about a week with a clean signal. Safe to take.",
+     changelog:["Added /agents subcommand","Faster project file search","Fixes MCP server reconnect loop"],
+     signals:[{c:"good",lbl:"Adoption",txt:"installs climbing, issue rate flat"},{c:"good",lbl:"Security",txt:"no known advisories"}]},
+    {ti:3, age:"released 21 days ago", rec:"security",
+     blurb:"Patch release. Recommended because it closes a security advisory.",
+     changelog:["Region-prioritized diagnostics","Patches a bundled dependency"],
+     signals:[{c:"danger",lbl:"Advisory",txt:"GHSA-4q6r ReDoS in a bundled dependency, fixed in this patch"},{c:"good",lbl:"Adoption",txt:"widely deployed, settled"}]},
+    {ti:5, age:"released 5 weeks ago", rec:"safe",
+     blurb:"Small patch, long settled.",
+     changelog:["Fix panic with --hyperlink-format","Minor multiline perf"],
+     signals:[{c:"good",lbl:"Adoption",txt:"stable, no open regressions"}]}
+  ];
+  var REC={safe:["✓ Safe to take","safe"],hold:["⚠ Hold for now","hold"],security:["🛡 Update (security)","security"]};
+  var HANDLES=["npstr_user_2001","l33t_w4rez","fast_pipe_99","t0tally_legit","dialup_dan","cd_burner","kazaa_refugee"];
+
+  function statusOf(t){ if(!t.installed) return "offline"; return t.installed!==t.latest?"update":"current"; }
+  function ping(n){ var h=0; for(var i=0;i<n.length;i++) h=(h*31+n.charCodeAt(i))>>>0; return 8+(h%320); }
+  function handleFor(n){ var h=0; for(var i=0;i<n.length;i++) h=(h*31+n.charCodeAt(i))>>>0; return HANDLES[h%HANDLES.length]; }
+  function fmtDl(n){ if(n>=1e6) return (n/1e6).toFixed(n>=1e7?0:1).replace(/\.0$/,"")+"M"; if(n>=1e3) return Math.round(n/1e3)+"K"; return ""+n; }
+  function findTool(pkg){ for(var i=0;i<TOOLS.length;i++) if(TOOLS[i].pkg===pkg) return i; return -1; }
+
+  var selected=null, lastQuery="";
+  var rowsEl=document.getElementById("rows");
+  var GLYPH={update:["↑","g-up"],current:["✓","g-ok"],offline:["✗","g-off"]};
+
+  // ---- LIBRARY -----------------------------------------------------------
+  function renderRows(){
+    rowsEl.innerHTML="";
+    TOOLS.forEach(function(t,i){
+      var st=statusOf(t), g=GLYPH[st], off=st==="offline";
+      var tr=document.createElement("tr"); tr.dataset.i=i;
+      if(selected===i) tr.className="sel";
+      var action = st==="update" ? '<button class="btn rowbtn" data-get="'+i+'">Get</button>'
+                 : off ? '<button class="btn rowbtn" data-get="'+i+'">Install</button>' : '<span class="muted">—</span>';
+      tr.innerHTML=
+        '<td class="glyph '+g[1]+'">'+g[0]+'</td>'+
+        '<td>'+(t.pinned?'📌 ':'')+t.name+' <span class="src '+t.eco+'">'+t.eco+'</span></td>'+
+        '<td class="'+(off?'muted':'')+'">'+(t.installed||"—")+'</td>'+
+        '<td class="'+(st==="update"?'vernew':'muted')+'">'+t.latest+'</td>'+
+        '<td class="user">@'+t.user+'</td>'+
+        '<td class="muted">'+t.size+'</td>'+
+        '<td class="muted">'+(off?"----":ping(t.name)+"ms")+'</td>'+
+        '<td><span class="pin '+(t.pinned?'on':'')+'" data-pin="'+i+'" title="freeze version, skip Update All">📌</span></td>'+
+        '<td>'+action+'</td>';
+      tr.addEventListener("click",function(){selected=i; renderRows();});
+      rowsEl.appendChild(tr);
+    });
+    renderStatus();
+  }
+  function renderStatus(){
+    var installed=TOOLS.filter(function(t){return t.installed;}).length;
+    var outdated=TOOLS.filter(function(t){return statusOf(t)==="update";}).length;
+    var pinned=TOOLS.filter(function(t){return t.pinned;}).length;
+    document.getElementById("sbInstalled").textContent=installed+" installed";
+    document.getElementById("sbState").textContent="tracking "+TOOLS.length+" packages \u00b7 "+outdated+" outdated"+(pinned?(" \u00b7 "+pinned+" pinned"):"");
+    document.getElementById("updateAll").disabled=TOOLS.filter(function(t){return statusOf(t)==="update"&&!t.pinned;}).length===0;
+    var nb=document.getElementById("newBadge"); nb.textContent=FEED.length; nb.style.display=FEED.length?"":"none";
+  }
+
+  // ---- SEARCH THE SWARM --------------------------------------------------
+  var resEl=document.getElementById("searchResults");
+  function runSearch(q){
+    lastQuery=q; switchTab("search");
+    if(!q){ resEl.innerHTML='<div class="empty">Search the swarm for a package to download.<span class="hint">Try: <b>linter</b>, <b>http</b>, <b>fuzzy</b>, <b>claude</b>, <b>git</b></span></div>'; return; }
+    resEl.innerHTML='<div class="searching">Searching the swarm for "'+q+'" ...</div>';
+    setTimeout(function(){ renderSearchResults(); }, 600);
+  }
+  function renderSearchResults(){
+    var q=lastQuery.toLowerCase();
+    if(!q){ runSearch(""); return; }
+    var hits=SWARM.filter(function(p){ return p.name.toLowerCase().indexOf(q)>=0 || p.pkg.toLowerCase().indexOf(q)>=0 || p.desc.toLowerCase().indexOf(q)>=0; })
+                  .sort(function(a,b){ return b.dl-a.dl; });
+    if(!hits.length){ resEl.innerHTML='<div class="empty">No peers are sharing "'+lastQuery+'". Try another term.</div>'; return; }
+    var body=hits.map(function(p){
+      var ti=findTool(p.pkg), inLib = ti>=0 && TOOLS[ti].installed;
+      var outdated = ti>=0 && statusOf(TOOLS[ti])==="update";
+      var act = inLib && !outdated ? '<span class="g-ok">✓ in library</span>'
+              : outdated ? '<button class="btn rowbtn" data-install="'+p.pkg+'">Update</button>'
+              : '<button class="btn rowbtn" data-install="'+p.pkg+'">Get</button>';
+      var fire = p.dl>=5e6 ? ' <span class="fire" title="heavily shared">🔥</span>' : '';
+      return '<tr>'+
+        '<td class="glyph g-off">♪</td>'+
+        '<td class="pkgcell"><b>'+p.name+'</b>'+fire+' <span class="muted">'+p.pkg+'</span><span class="desc">'+p.desc+'</span></td>'+
+        '<td class="user">'+p.version+'</td>'+
+        '<td class="dl">'+fmtDl(p.dl)+'</td>'+
+        '<td><span class="src '+p.eco+'">'+p.eco+'</span></td>'+
+        '<td class="muted">'+p.size+'</td>'+
+        '<td>'+act+'</td></tr>';
+    }).join("");
+    resEl.innerHTML='<table><thead><tr><th></th><th>Package</th><th>Version</th><th>Downloads/wk</th><th>Source</th><th>Size</th><th></th></tr></thead><tbody>'+body+'</tbody></table>';
+  }
+  resEl.addEventListener("click",function(e){
+    var b=e.target.closest("[data-install]"); if(!b) return;
+    installPackage(b.dataset.install);
+  });
+  function installPackage(pkg){
+    var p=null; for(var i=0;i<SWARM.length;i++) if(SWARM[i].pkg===pkg) p=SWARM[i];
+    if(!p) return;
+    var ti=findTool(pkg);
+    if(ti>=0){
+      if(statusOf(TOOLS[ti])==="update"){ queueTransfer(ti, TOOLS[ti].latest, "update"); switchTab("transfers"); }
+      return;
+    }
+    TOOLS.push({name:p.name, eco:p.eco, pkg:p.pkg, installed:null, latest:p.version, size:p.size, user:handleFor(p.name), pinned:false});
+    queueTransfer(TOOLS.length-1, p.version, "install");
+    switchTab("transfers");
+  }
+
+  // ---- WHAT'S NEW --------------------------------------------------------
+  function renderFeed(){
+    var f=document.getElementById("feed"); f.innerHTML="";
+    if(!FEED.length){ f.innerHTML='<div class="empty">You\u2019re on the latest of everything.</div>'; return; }
+    FEED.forEach(function(it,idx){
+      var t=TOOLS[it.ti], r=REC[it.rec];
+      var sig=it.signals.map(function(s){return '<div class="signal '+s.c+'"><span class="lbl">'+s.lbl+':</span> '+s.txt+'</div>';}).join("");
+      var log=it.changelog.map(function(c){return '<li>'+c+'</li>';}).join("");
+      var card=document.createElement("div"); card.className="card raised";
+      card.innerHTML='<div class="card-h" data-card="'+idx+'"><span class="caret">+</span>'+
+        '<span class="nm">'+t.name+'</span><span class="ver">'+t.installed+' \u2192 '+t.latest+'</span>'+
+        '<span class="age">'+it.age+'</span><span class="rec '+r[1]+'">'+r[0]+'</span></div>'+
+        '<div class="card-b"><div>'+it.blurb+'</div>'+
+        '<div style="font-weight:bold;margin-top:6px">What changed</div><ul>'+log+'</ul>'+sig+
+        '<button class="btn rowbtn" style="margin-top:8px" data-getfeed="'+idx+'">Get '+t.latest+'</button></div>';
+      f.appendChild(card);
+    });
+  }
+  document.getElementById("feed").addEventListener("click",function(e){
+    var h=e.target.closest("[data-card]");
+    if(h){ var c=h.parentElement; c.classList.toggle("open"); h.querySelector(".caret").textContent=c.classList.contains("open")?"\u2013":"+"; return; }
+    var g=e.target.closest("[data-getfeed]");
+    if(g){ var it=FEED[+g.dataset.getfeed]; queueTransfer(it.ti, TOOLS[it.ti].latest, "update"); switchTab("transfers"); }
+  });
+
+  // ---- TRANSFERS ---------------------------------------------------------
+  var xfers=[], history=[];
+  var xferListEl=document.getElementById("xferList"), histWrap=document.getElementById("histWrap"), badge=document.getElementById("xferBadge");
+  function renderXfers(){
+    if(!xfers.length){ xferListEl.innerHTML='<div class="empty">Nothing transferring.</div>'; }
+    else{ xferListEl.innerHTML="";
+      xfers.forEach(function(x){
+        var d=document.createElement("div"); d.className="xfer-row raised";
+        d.innerHTML='<div class="xfer-top"><div class="name">'+x.name+'</div><div class="from">@'+x.user+'</div>'+
+          '<div class="kbps">'+(x.done?"done":x.kbps+" KB/s")+'</div></div>'+
+          '<div class="cmd">$ '+x.cmd+'</div>'+
+          '<div class="pbar sunken"><div class="fill" style="width:'+x.pct+'%"></div><div class="pct">'+(x.done?"complete":x.pct+"%")+'</div></div>';
+        xferListEl.appendChild(d);
+      });
+    }
+    var active=xfers.filter(function(x){return !x.done;}).length;
+    badge.textContent=active; badge.style.display=active?"":"none";
+  }
+  function renderHistory(){
+    if(!history.length){ histWrap.innerHTML='<div class="empty">No version changes yet.</div>'; return; }
+    var rows=history.map(function(h,i){
+      var label=h.action==="update"?"updated":h.action==="rollback"?"rolled back":"installed";
+      var rb=h.action!=="rollback"?'<button class="btn rowbtn" data-roll="'+i+'">Roll back</button>':'<span class="muted">\u2014</span>';
+      return '<tr><td class="t">'+h.time+'</td><td><b>'+h.name+'</b></td><td class="act-'+h.action+'">'+label+'</td>'+
+        '<td class="user">'+(h.from||"\u2014")+' \u2192 '+h.to+'</td><td>'+rb+'</td></tr>';
+    }).join("");
+    histWrap.innerHTML='<table class="hist"><tbody>'+rows+'</tbody></table>';
+  }
+  histWrap.addEventListener("click",function(e){ var b=e.target.closest("[data-roll]"); if(!b) return;
+    var h=history[+b.dataset.roll]; queueTransfer(h.ti,h.from,"rollback"); switchTab("transfers"); });
+  function addHistory(ti,action,from,to){
+    history.unshift({ti:ti,name:TOOLS[ti].name,action:action,from:from,to:to,
+      time:new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})});
+    renderHistory();
+  }
+  function queueTransfer(ti,target,action){
+    var t=TOOLS[ti], from=t.installed;
+    var cmd=(t.eco==="npm"?"npm i -g "+t.pkg+"@"+target:t.eco==="brew"?"brew install "+t.pkg+"@"+target:"pip install "+t.pkg+"=="+target);
+    var x={name:t.name,user:t.user,pct:0,kbps:0,done:false,cmd:cmd};
+    xfers.push(x); renderXfers();
+    var base=30+(ping(t.name)%50);
+    var iv=setInterval(function(){
+      x.pct+=Math.max(1,Math.round(Math.random()*8)); x.kbps=base+Math.round(Math.random()*40);
+      if(x.pct>=100){ x.pct=100; x.done=true; clearInterval(iv);
+        t.installed=target; addHistory(ti,action,from,target); renderRows();
+        if(lastQuery) renderSearchResults();
+        setTimeout(function(){ xfers=xfers.filter(function(z){return z!==x;}); renderXfers(); },2500);
+      }
+      renderXfers();
+    },200);
+  }
+
+  // ---- EVENTS / TABS / DRAG / SPLASH ------------------------------------
+  document.getElementById("searchBtn").addEventListener("click",function(){ runSearch(document.getElementById("search").value.trim()); });
+  document.getElementById("search").addEventListener("keydown",function(e){ if(e.key==="Enter") runSearch(this.value.trim()); });
+  document.getElementById("updateAll").addEventListener("click",function(){
+    TOOLS.forEach(function(t,i){ if(statusOf(t)==="update"&&!t.pinned) queueTransfer(i,t.latest,"update"); }); switchTab("transfers");
+  });
+  rowsEl.addEventListener("click",function(e){
+    var p=e.target.closest("[data-pin]");
+    if(p){ e.stopPropagation(); var i=+p.dataset.pin; TOOLS[i].pinned=!TOOLS[i].pinned; renderRows(); return; }
+    var b=e.target.closest("[data-get]");
+    if(b){ e.stopPropagation(); var j=+b.dataset.get; queueTransfer(j,TOOLS[j].latest,TOOLS[j].installed?"update":"install"); switchTab("transfers"); }
+  });
+  function switchTab(name){
+    document.querySelectorAll(".tab").forEach(function(t){t.classList.toggle("active",t.dataset.view===name);});
+    document.querySelectorAll(".view").forEach(function(v){v.classList.toggle("active",v.dataset.view===name);});
+    var titles={library:"Shared Library",search:"Search",whatsnew:"What's New",transfers:"Transfers"};
+    document.querySelector(".titlebar .title").textContent="- npstr AI Package Manager ["+titles[name]+"]";
+  }
+  document.querySelectorAll(".tab").forEach(function(t){ t.addEventListener("click",function(){ if(t.dataset.view==="search") runSearch(lastQuery); else switchTab(t.dataset.view); }); });
+
+  (function(){ var win=document.getElementById("win"),bar=document.getElementById("titlebar"),dx=0,dy=0,drag=false;
+    bar.addEventListener("mousedown",function(e){drag=true;var r=win.getBoundingClientRect();dx=e.clientX-r.left;dy=e.clientY-r.top;win.style.position="fixed";win.style.margin="0";});
+    window.addEventListener("mousemove",function(e){if(!drag)return;win.style.left=(e.clientX-dx)+"px";win.style.top=(e.clientY-dy)+"px";});
+    window.addEventListener("mouseup",function(){drag=false;}); })();
+
+  var splash=document.getElementById("splash"),sBody=document.getElementById("splashBody");
+  var steps=['Dialing registry.npmjs.org','<span class="ok">connected.</span><br>Scanning npm globals',
+    '<span class="ok">7 found.</span><br>Checking for newer releases','<span class="ok">done.</span><br>4 updates available across npm, brew, pip.'];
+  var si=0;
+  function nextStep(){ if(si>=steps.length){ setTimeout(function(){splash.style.transition="opacity .3s";splash.style.opacity="0";setTimeout(function(){splash.style.display="none";},320);},450); return; }
+    sBody.innerHTML=steps.slice(0,si+1).join('<br>'); si++; setTimeout(nextStep,560); }
+
+  renderRows(); renderFeed(); renderXfers(); renderHistory(); runSearch(""); nextStep();
+})();
+</script>
+</body>
+</html>
