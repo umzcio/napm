@@ -296,7 +296,7 @@
         '<td>'+(t.pinned?'📌 ':'')+t.name+' <span class="src '+t.eco+'">'+t.eco+'</span></td>'+
         '<td class="'+(off?'muted':'')+'">'+(t.installed||"—")+'</td>'+
         '<td class="'+(st==="update"&&!npx?'vernew':'muted')+'">'+(npx?"—":t.latest)+'</td>'+
-        '<td class="user">@'+t.user+'</td>'+
+        '<td class="user'+(t.publisher?'':' muted')+'">@'+(t.publisher||"unknown")+'</td>'+
         '<td class="muted">'+t.size+'</td>'+
         '<td class="muted">'+(off?"----":ping(t.name)+"ms")+'</td>'+
         '<td><span class="pin '+(t.pinned?'on':'')+'" data-pin="'+i+'" title="freeze version, skip Update All">📌</span></td>'+
@@ -487,7 +487,6 @@
     if(!inv){ renderRows(); renderFeed(); renderStatus(); return; }
     inv("scan_installed").then(function(tools){
       TOOLS = tools || [];
-      TOOLS.forEach(function(t){ if(!t.user) t.user = handleFor(t.name); });
       renderRows(); renderFeed(); renderStatus();
     }).catch(function(e){ console.error("scan_installed failed", e); renderRows(); renderFeed(); renderStatus(); });
   }
