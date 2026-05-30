@@ -1,7 +1,6 @@
 use super::InstalledTool;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
-use std::process::Command;
 use serde_json::Value;
 
 /// Merge `npm ls -g --json` (installed) with `npm outdated -g --json` (latest),
@@ -62,17 +61,9 @@ pub fn parse_npm(ls_json: &str, outdated_json: &str) -> Vec<InstalledTool> {
 /// Run the real npm commands and merge. `npm outdated` exits non-zero when
 /// results exist, so we read stdout regardless of exit status.
 pub fn scan_npm() -> Vec<InstalledTool> {
-    let ls = run_npm(&["ls", "-g", "--depth=0", "--json"]);
-    let outdated = run_npm(&["outdated", "-g", "--json"]);
+    let ls = super::run("npm", &["ls", "-g", "--depth=0", "--json"]);
+    let outdated = super::run("npm", &["outdated", "-g", "--json"]);
     parse_npm(&ls, &outdated)
-}
-
-fn run_npm(args: &[&str]) -> String {
-    Command::new("npm")
-        .args(args)
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-        .unwrap_or_default()
 }
 
 #[cfg(test)]
