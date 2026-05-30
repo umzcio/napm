@@ -10,3 +10,6 @@ napm.sqlite
 # Rust / Tauri
 /target
 /src-tauri/target
+
+# Original project archive (unpacked into the tree)
+napm.zip
