@@ -1,0 +1,123 @@
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+
+/// One logged version change. Mirrors the prototype's HistoryEntry, plus `eco`
+/// so rollback can rebuild the command.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HistoryEntry {
+    pub ts: i64,
+    pub pkg: String,
+    pub eco: String,
+    pub action: String, // "install" | "update" | "rollback"
+    pub from: Option<String>,
+    pub to: String,
+}
+
+/// Flat-JSON persistence for pins and history in a single directory.
+pub struct Store {
+    dir: PathBuf,
+}
+
+impl Store {
+    pub fn new(dir: PathBuf) -> Store {
+        let _ = std::fs::create_dir_all(&dir);
+        Store { dir }
+    }
+
+    fn pins_path(&self) -> PathBuf { self.dir.join("pins.json") }
+    fn history_path(&self) -> PathBuf { self.dir.join("history.json") }
+
+    fn read_json<T: for<'de> Deserialize<'de> + Default>(path: &Path) -> T {
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+
+    fn write_json<T: Serialize>(path: &Path, value: &T) {
+        if let Ok(s) = serde_json::to_string_pretty(value) {
+            let _ = std::fs::write(path, s);
+        }
+    }
+
+    pub fn pins(&self) -> BTreeSet<String> {
+        Self::read_json(&self.pins_path())
+    }
+
+    pub fn set_pin(&self, pkg: &str, on: bool) {
+        let mut pins = self.pins();
+        if on {
+            pins.insert(pkg.to_string());
+        } else {
+            pins.remove(pkg);
+        }
+        Self::write_json(&self.pins_path(), &pins);
+    }
+
+    /// History newest-first.
+    pub fn history(&self) -> Vec<HistoryEntry> {
+        let mut h: Vec<HistoryEntry> = Self::read_json(&self.history_path());
+        h.sort_by(|a, b| b.ts.cmp(&a.ts));
+        h
+    }
+
+    pub fn add_history(&self, entry: HistoryEntry) {
+        let mut h: Vec<HistoryEntry> = Self::read_json(&self.history_path());
+        h.push(entry);
+        Self::write_json(&self.history_path(), &h);
+    }
+
+    #[cfg(test)]
+    pub fn dir_for_test(&self) -> PathBuf {
+        self.dir.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_store() -> Store {
+        // unique dir per test process+address; no Date/rand needed
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("napm-test-{:p}", &dir));
+        let _ = std::fs::remove_dir_all(&dir);
+        Store::new(dir)
+    }
+
+    #[test]
+    fn pins_round_trip_and_dedupe() {
+        let s = temp_store();
+        assert!(s.pins().is_empty());
+        s.set_pin("typescript", true);
+        s.set_pin("typescript", true); // idempotent
+        s.set_pin("eslint", true);
+        let pins = s.pins();
+        assert!(pins.contains("typescript") && pins.contains("eslint") && pins.len() == 2);
+        s.set_pin("typescript", false);
+        assert!(!s.pins().contains("typescript"));
+    }
+
+    #[test]
+    fn history_appends_newest_first() {
+        let s = temp_store();
+        assert!(s.history().is_empty());
+        s.add_history(HistoryEntry { ts: 1, pkg: "a".into(), eco: "npm".into(), action: "install".into(), from: None, to: "1.0".into() });
+        s.add_history(HistoryEntry { ts: 2, pkg: "b".into(), eco: "npm".into(), action: "update".into(), from: Some("1.0".into()), to: "2.0".into() });
+        let h = s.history();
+        assert_eq!(h.len(), 2);
+        assert_eq!(h[0].pkg, "b"); // newest first
+        assert_eq!(h[1].pkg, "a");
+    }
+
+    #[test]
+    fn missing_or_corrupt_files_read_as_empty() {
+        let s = temp_store();
+        std::fs::create_dir_all(&s_dir(&s)).unwrap();
+        std::fs::write(s_dir(&s).join("pins.json"), b"not json").unwrap();
+        assert!(s.pins().is_empty()); // corrupt -> empty, no panic
+    }
+
+    fn s_dir(s: &Store) -> PathBuf { s.dir_for_test() }
+}

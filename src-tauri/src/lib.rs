@@ -1,4 +1,5 @@
 mod scan;
+mod store;
 
 use scan::InstalledTool;
 
