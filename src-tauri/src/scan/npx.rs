@@ -94,6 +94,7 @@ pub fn scan_npx() -> Vec<InstalledTool> {
                 publisher,
                 description,
                 updated: super::path_mtime(&pkg_dir),
+                requested: true,
             });
         }
     }
@@ -116,6 +117,7 @@ mod tests {
             publisher: publisher.to_string(),
             description: String::new(),
             updated: 0,
+            requested: true,
         }
     }
 

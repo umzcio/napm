@@ -27,6 +27,10 @@ pub struct InstalledTool {
     /// seconds (brew's recorded install time where available, else folder
     /// mtime). 0 when unknown. The frontend renders this relatively.
     pub updated: i64,
+    /// True when the user explicitly asked for this tool (npm/pip/npx globals are
+    /// always user-chosen; for brew this is installed_on_request from the receipt).
+    /// Unknown defaults to true so "only tools I installed" never wrongly hides a tool.
+    pub requested: bool,
 }
 
 /// Run a command and return its stdout, ignoring exit status (some tools, like

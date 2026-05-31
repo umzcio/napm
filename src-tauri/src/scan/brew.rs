@@ -63,6 +63,7 @@ pub fn parse_brew(list_versions: &str, outdated_json: &str) -> Vec<InstalledTool
             publisher: String::new(),
             description: String::new(),
             updated: 0,
+            requested: true,
         })
         .collect()
 }
@@ -96,19 +97,6 @@ pub fn parse_brew_info(info_json: &str) -> BTreeMap<String, (String, String)> {
     map
 }
 
-/// Recorded install time of a keg from its INSTALL_RECEIPT.json `time`, falling
-/// back to the keg directory's mtime.
-fn brew_install_time(keg: &std::path::Path) -> i64 {
-    if let Ok(s) = std::fs::read_to_string(keg.join("INSTALL_RECEIPT.json")) {
-        if let Ok(v) = serde_json::from_str::<Value>(&s) {
-            if let Some(t) = v.get("time").and_then(|x| x.as_i64()) {
-                return t;
-            }
-        }
-    }
-    super::path_mtime(keg)
-}
-
 /// Run the real brew commands and merge, then enrich publisher, description,
 /// size (the installed keg), and install time.
 pub fn scan_brew() -> Vec<InstalledTool> {
@@ -130,17 +118,46 @@ pub fn scan_brew() -> Vec<InstalledTool> {
                     .join("Cellar")
                     .join(&row.pkg)
                     .join(ver);
+                let (updated, requested) = brew_receipt(&keg);
                 row.size = super::size::human_size(super::size::dir_size(&keg));
-                row.updated = brew_install_time(&keg);
+                row.updated = updated;
+                row.requested = requested;
             }
         }
     }
     rows
 }
 
+/// Parse an INSTALL_RECEIPT.json body into (install_time_secs, installed_on_request).
+/// Either may be None when absent.
+pub fn parse_install_receipt(json: &str) -> (Option<i64>, Option<bool>) {
+    let v: Value = match serde_json::from_str(json) { Ok(v) => v, Err(_) => return (None, None) };
+    let time = v.get("time").and_then(|x| x.as_i64());
+    let on_request = v.get("installed_on_request").and_then(|x| x.as_bool());
+    (time, on_request)
+}
+
+/// (install time secs, installed_on_request) for a keg, with sensible fallbacks:
+/// time falls back to the keg mtime; on_request defaults to true when unknown.
+fn brew_receipt(keg: &std::path::Path) -> (i64, bool) {
+    let (time, on_request) = std::fs::read_to_string(keg.join("INSTALL_RECEIPT.json"))
+        .map(|s| parse_install_receipt(&s))
+        .unwrap_or((None, None));
+    (time.unwrap_or_else(|| super::path_mtime(keg)), on_request.unwrap_or(true))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn receipt_yields_time_and_on_request() {
+        let r = r#"{"time":1700000000,"installed_on_request":false}"#;
+        assert_eq!(parse_install_receipt(r), (Some(1700000000), Some(false)));
+        let r2 = r#"{"time":1700000000,"installed_on_request":true}"#;
+        assert_eq!(parse_install_receipt(r2).1, Some(true));
+        assert_eq!(parse_install_receipt("nope"), (None, None));
+    }
 
     #[test]
     fn current_formula_has_equal_installed_and_latest() {
