@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 pub mod osv;
 pub mod wire;
@@ -61,6 +62,44 @@ pub struct WhatsNew {
     pub wire: Vec<WireItem>,
     pub wire_ok: bool,
     pub verdicts: Vec<ReleaseInfo>,
+}
+
+/// Run all three layers concurrently and assemble the feed payload.
+/// `verdict_scope` is the list of pkg names (matching ToolRef.pkg) the frontend
+/// wants age verdicts for. Verdicts already covered by a security alert are dropped.
+pub fn whats_new(installed: &[ToolRef], verdict_scope: &[String], cache_dir: &Path, now: i64) -> WhatsNew {
+    std::thread::scope(|s| {
+        let sec = s.spawn(|| osv::scan_security(installed));
+        let wir = s.spawn(|| wire::fetch_wire(cache_dir));
+        let ver = s.spawn(|| {
+            verdict_scope.iter().filter_map(|pkg| {
+                let t = installed.iter().find(|t| &t.pkg == pkg)?;
+                let (rec, age_label) = release::release_age(&t.eco, &t.pkg, &t.latest, now);
+                Some(ReleaseInfo {
+                    pkg: t.pkg.clone(), eco: t.eco.clone(), version: t.latest.clone(),
+                    age_label, recommendation: rec,
+                })
+            }).collect::<Vec<_>>()
+        });
+
+        let sec = sec.join().unwrap_or(None);
+        let wir = wir.join().unwrap_or(None);
+        let mut verdicts = ver.join().unwrap_or_default();
+
+        let (alerts, security_ok) = match sec {
+            Some(a) => (a, true),
+            None => (Vec::new(), false),
+        };
+        // Drop verdicts that are already covered by a security alert.
+        let flagged: std::collections::BTreeSet<&str> = alerts.iter().map(|a| a.pkg.as_str()).collect();
+        verdicts.retain(|v| !flagged.contains(v.pkg.as_str()));
+
+        let (wire, wire_ok) = match wir {
+            Some(w) => (w, true),
+            None => (Vec::new(), false),
+        };
+        WhatsNew { alerts, security_ok, wire, wire_ok, verdicts }
+    })
 }
 
 #[cfg(test)]

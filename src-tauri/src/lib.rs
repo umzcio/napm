@@ -62,10 +62,26 @@ fn search_registry(app: tauri::AppHandle, query: String) -> Vec<search::SearchRe
     search::search_all(&query, &dir)
 }
 
+#[tauri::command]
+fn get_whats_new(app: tauri::AppHandle, installed: Vec<intel::ToolRef>, verdict_scope: Vec<String>) -> intel::WhatsNew {
+    let dir = app.path().app_data_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let _ = std::fs::create_dir_all(&dir);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+    intel::whats_new(&installed, &verdict_scope, &dir, now)
+}
+
+#[tauri::command]
+fn get_changelog(app: tauri::AppHandle, eco: String, pkg: String, version: String) -> Vec<String> {
+    let dir = app.path().app_data_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let _ = std::fs::create_dir_all(&dir);
+    intel::release::changelog(&eco, &pkg, &version, &dir)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
-    .invoke_handler(tauri::generate_handler![scan_installed, set_pin, get_history, run_op, search_registry])
+    .invoke_handler(tauri::generate_handler![scan_installed, set_pin, get_history, run_op, search_registry, get_whats_new, get_changelog])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
