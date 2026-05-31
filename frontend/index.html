@@ -326,8 +326,8 @@
   var GLYPH={update:["↑","g-up"],current:["✓","g-ok"],offline:["✗","g-off"],unmanaged:["?","g-man"]};
 
   // ---- VIEW (library filters/sort, persisted) ----------------------------
-  var VIEW = { requested:false, outdated:false, sources:{npm:true,brew:true,pip:true,npx:true}, sort:"name", desc:true };
-  try{ var sv=JSON.parse(localStorage.getItem("napm.view")); if(sv){ VIEW=Object.assign(VIEW, sv); VIEW.sources=Object.assign({npm:true,brew:true,pip:true,npx:true}, sv.sources||{}); } }catch(e){}
+  var VIEW = { requested:false, outdated:false, sources:{npm:true,brew:true,pip:true,npx:true,manual:true}, sort:"name", desc:true };
+  try{ var sv=JSON.parse(localStorage.getItem("napm.view")); if(sv){ VIEW=Object.assign(VIEW, sv); VIEW.sources=Object.assign({npm:true,brew:true,pip:true,npx:true,manual:true}, sv.sources||{}); } }catch(e){}
   function saveView(){ try{ localStorage.setItem("napm.view", JSON.stringify(VIEW)); }catch(e){} }
   function setSort(k){ VIEW.sort=k; saveView(); renderRows(); }
   function toggleView(k){ VIEW[k]=!VIEW[k]; saveView(); renderRows(); }
@@ -914,6 +914,7 @@
       {label:"Source: brew", checked:function(){return VIEW.sources.brew;}, run:function(){toggleSource("brew");}},
       {label:"Source: pip", checked:function(){return VIEW.sources.pip;}, run:function(){toggleSource("pip");}},
       {label:"Source: npx", checked:function(){return VIEW.sources.npx;}, run:function(){toggleSource("npx");}},
+      {label:"Source: manual", checked:function(){return VIEW.sources.manual;}, run:function(){toggleSource("manual");}},
       {sep:true},
       {label:"Sort by name", dot:function(){return VIEW.sort==="name";}, run:function(){setSort("name");}},
       {label:"Sort by size", dot:function(){return VIEW.sort==="size";}, run:function(){setSort("size");}},
