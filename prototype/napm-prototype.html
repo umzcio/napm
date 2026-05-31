@@ -207,8 +207,8 @@
 
   <div class="tabs">
     <div class="tab active" data-view="library">Shared Library</div>
-    <div class="tab" data-view="search">Search</div>
     <div class="tab" data-view="whatsnew">What's New <span class="badge" id="newBadge">0</span></div>
+    <div class="tab" data-view="search">Search</div>
     <div class="tab" data-view="transfers">Transfers <span class="badge" id="xferBadge" style="display:none">0</span></div>
   </div>
 
@@ -710,7 +710,9 @@
     }).catch(function(){});
   }
   setAppVersion();
-  renderXfers(); loadHistory(); runSearch(""); nextStep(); scanLibrary();
+  // Initialize the Search empty state, then land on Shared Library (the instant,
+  // local home) rather than Search.
+  renderXfers(); loadHistory(); runSearch(""); switchTab("library"); nextStep(); scanLibrary();
 })();
 </script>
 </body>
