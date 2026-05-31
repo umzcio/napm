@@ -38,11 +38,19 @@ fn capture_login_path() -> Option<String> {
     let probe = "printf '__NAPM_PATH_START__%s__NAPM_PATH_END__' \"$PATH\"";
     let out = run_shell(&shell, &["-ilc", probe], Duration::from_millis(2000))?;
     let p = extract_path(&out)?;
-    if p.contains('/') {
+    if looks_like_path(&p) {
         Some(p)
     } else {
         None
     }
+}
+
+/// A trustworthy PATH looks like a colon-delimited list of absolute dirs. Reject
+/// a value with spaces but no colon: fish prints `$PATH` space-joined, which
+/// would otherwise clobber the inherited PATH with one unusable entry. (A normal
+/// PATH may contain a space inside a dir name, but then it also has a colon.)
+fn looks_like_path(p: &str) -> bool {
+    p.contains('/') && !(p.contains(' ') && !p.contains(':'))
 }
 
 /// Spawn `shell args...`, capture stdout, and kill it if it exceeds `dur`.
@@ -100,5 +108,20 @@ mod tests {
     fn empty_between_markers_is_none() {
         assert_eq!(extract_path("__NAPM_PATH_START____NAPM_PATH_END__"), None);
         assert_eq!(extract_path("__NAPM_PATH_START__   __NAPM_PATH_END__"), None);
+    }
+
+    #[test]
+    fn looks_like_path_accepts_colon_delimited() {
+        assert!(looks_like_path("/opt/homebrew/bin:/usr/bin"));
+        assert!(looks_like_path("/usr/bin")); // single entry, no space
+        assert!(looks_like_path("/Users/x/My Tools/bin:/usr/bin")); // space inside a dir, but colon-delimited
+    }
+
+    #[test]
+    fn looks_like_path_rejects_fish_space_joined() {
+        // fish prints $PATH space-joined with no colons: unusable as a Unix PATH.
+        assert!(!looks_like_path("/opt/homebrew/bin /usr/bin /sbin"));
+        assert!(!looks_like_path("not a path"));
+        assert!(!looks_like_path(""));
     }
 }
