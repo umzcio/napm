@@ -70,20 +70,37 @@ without changing behavior or honesty (verified live, much faster):
 Result: a warm search is well under a second. Pure parsers and the
 fail-independently behavior are preserved.
 
-## Next: M5 - What's New (the decision feed)
+## Done: M5 - What's New (the decision feed + security intelligence)
 
-One card per available update: should you take it, and why.
+Real release and security intelligence per tool, behind the existing card UI.
+Three layers, priority order malicious -> vulnerable -> safe -> new, with a
+supply-chain wire above everything.
 
-- `security` (advisory exists, always take), `safe` (settled, no advisories),
-  `hold` (fresh + elevated issue velocity - deferred scoring). Changelog from
-  GitHub releases.
-- Layers on top of the appetite dial: the dial is the quick offline policy;
-  What's New is the detailed network-backed justification and can override
-  (fresh major with a bug spike stays hold even on bleeding-edge; a security
-  patch is always safe). Adds a stricter "security-only" notch at the dial's
-  far left.
+- **Layer 1 - protect what you have.** One batched OSV query over EVERY installed
+  tool at its current version (not just outdated). Flags `malicious` (OpenSSF
+  malicious-packages / GitHub malware data, the supply-chain hijacks) and
+  `vulnerable` (CVE/GHSA). Runs regardless of the appetite dial. A truncated or
+  failed OSV response is treated as a failed check, never a clean result.
+- **Layer 2 - the supply-chain wire.** A bulletin strip fed by GitHub's recent
+  npm + pip malware advisories, cached hourly. Surfaces big ecosystem events even
+  for packages you do not have.
+- **Layer 3 - update verdicts.** Age-based `safe` (settled, older than 7 days) or
+  `new` (fresh, little signal yet) for the appetite-scoped update set. Changelog
+  loaded lazily on card expand from the upstream GitHub releases (repo derived
+  offline from package metadata). The real issue-velocity `hold` stays v1.5.
+- **Honesty.** npm + pip fully covered; brew is excluded from the OSV scan (no
+  Homebrew ecosystem) and labeled, not shown as clean. The core rule throughout:
+  never imply "safe" when a check could not run. A malicious package with no fix
+  shows a copyable remove command, not a fake one-click.
+- New `src-tauri/src/intel/` module (OSV, wire, release) behind a shared
+  crate-root `http`; commands `get_whats_new` and `get_changelog`. Keyless by
+  default; `GITHUB_TOKEN` raises the rate limit if present.
 
-## M6 - Menu bar (File/Edit/View/Swarm/Help)
+Deferred to v1.5: issue-velocity `hold`, brew/system-tool CVE mapping
+(Debian/Alpine), a one-click uninstall op, and the appetite dial's "security-only"
+far-left notch.
+
+## Next: M6 - Menu bar (File/Edit/View/Swarm/Help)
 
 Make the inert Win98 menu bar do real things.
 
