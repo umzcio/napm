@@ -20,8 +20,9 @@ fn open_store(app: &tauri::AppHandle) -> Store {
 
 #[tauri::command]
 fn scan_installed(app: tauri::AppHandle) -> Vec<InstalledTool> {
-    let pins = open_store(&app).pins();
-    scan::scan_all(&pins)
+    let store = open_store(&app);
+    let pins = store.pins();
+    scan::scan_all(&pins, store.settings().sources)
 }
 
 #[tauri::command]
@@ -59,7 +60,8 @@ fn search_registry(app: tauri::AppHandle, query: String) -> Vec<search::SearchRe
         .app_data_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."));
     let _ = std::fs::create_dir_all(&dir);
-    search::search_all(&query, &dir)
+    let sources = open_store(&app).settings().sources;
+    search::search_all(&query, &dir, sources)
 }
 
 #[tauri::command]

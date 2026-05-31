@@ -73,6 +73,18 @@ pub struct WhatsNew {
     pub verdicts: Vec<ReleaseInfo>,
 }
 
+/// The GitHub token for API calls: the stored settings value if present and
+/// non-empty, otherwise the GITHUB_TOKEN env var. None when neither is set.
+/// Reads settings.json directly from the cache dir (== app-data dir) to avoid a
+/// dependency on the store module.
+pub fn github_token(cache_dir: &Path) -> Option<String> {
+    let from_file = std::fs::read_to_string(cache_dir.join("settings.json")).ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("githubToken").and_then(|t| t.as_str()).map(String::from))
+        .filter(|t| !t.trim().is_empty());
+    from_file.or_else(|| std::env::var("GITHUB_TOKEN").ok().filter(|t| !t.trim().is_empty()))
+}
+
 /// Run all three layers concurrently and assemble the feed payload.
 /// `verdict_scope` is the list of pkg names (matching ToolRef.pkg) the frontend
 /// wants age verdicts for. Verdicts already covered by a security alert are dropped.

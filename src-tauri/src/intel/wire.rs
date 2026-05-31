@@ -52,12 +52,18 @@ pub fn fetch_wire(cache_dir: &Path) -> Option<Vec<WireItem>> {
     let npm_url = "https://api.github.com/advisories?type=malware&ecosystem=npm&sort=published&per_page=15";
     let pip_url = "https://api.github.com/advisories?type=malware&ecosystem=pip&sort=published&per_page=15";
 
-    let npm_result = crate::http::get_with_headers(npm_url, &[
-        ("Accept", "application/vnd.github+json"),
-    ]);
-    let pip_result = crate::http::get_with_headers(pip_url, &[
-        ("Accept", "application/vnd.github+json"),
-    ]);
+    // Build auth header string bindings so references live long enough.
+    let token_str: String;
+    let token_header: String;
+    let mut base_headers: Vec<(&str, &str)> = vec![("Accept", "application/vnd.github+json")];
+    if let Some(token) = super::github_token(cache_dir) {
+        token_str = token;
+        token_header = format!("Bearer {}", token_str);
+        base_headers.push(("Authorization", &token_header));
+    }
+
+    let npm_result = crate::http::get_with_headers(npm_url, &base_headers);
+    let pip_result = crate::http::get_with_headers(pip_url, &base_headers);
 
     let npm_ok = npm_result.is_ok();
     let pip_ok = pip_result.is_ok();

@@ -1,5 +1,6 @@
 use serde::Serialize;
 use std::process::Command;
+use crate::store::Sources;
 
 pub mod npm;
 pub mod brew;
@@ -56,12 +57,13 @@ pub(crate) fn path_mtime(path: &std::path::Path) -> i64 {
 }
 
 /// Aggregate across all sources, marking rows whose pkg is in `pins`.
-pub fn scan_all(pins: &std::collections::BTreeSet<String>) -> Vec<InstalledTool> {
+/// Only sources enabled in `sources` are scanned.
+pub fn scan_all(pins: &std::collections::BTreeSet<String>, sources: Sources) -> Vec<InstalledTool> {
     let mut all = Vec::new();
-    all.extend(npm::scan_npm());
-    all.extend(brew::scan_brew());
-    all.extend(pip::scan_pip());
-    all.extend(npx::scan_npx());
+    if sources.npm { all.extend(npm::scan_npm()); }
+    if sources.brew { all.extend(brew::scan_brew()); }
+    if sources.pip { all.extend(pip::scan_pip()); }
+    if sources.npx { all.extend(npx::scan_npx()); }
     for row in all.iter_mut() {
         row.pinned = pins.contains(&row.pkg);
     }

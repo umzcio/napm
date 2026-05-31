@@ -1,5 +1,6 @@
 use serde::Serialize;
 use std::path::Path;
+use crate::store::Sources;
 
 pub mod npm;
 pub mod brew;
@@ -38,21 +39,22 @@ pub fn merge(sources: Vec<Vec<SearchResult>>) -> Vec<SearchResult> {
 
 /// Federated swarm search: npm + brew + pip, merged and sorted. Each source
 /// fails independently to an empty list, so one dead registry never blanks the
-/// grid. `cache_dir` holds the brew catalog/analytics caches.
-pub fn search_all(query: &str, cache_dir: &Path) -> Vec<SearchResult> {
+/// grid. `cache_dir` holds the brew catalog/analytics caches. Only sources
+/// enabled in `sources` are queried (npx is not a search source).
+pub fn search_all(query: &str, cache_dir: &Path, sources: Sources) -> Vec<SearchResult> {
     let query = query.trim();
     if query.is_empty() { return Vec::new(); }
-    // Fan out the three sources concurrently: total latency becomes the slowest
+    // Fan out the enabled sources concurrently: total latency becomes the slowest
     // source, not the sum. A panicking source thread degrades to an empty list,
     // so one dead registry still never blanks the grid.
     std::thread::scope(|s| {
-        let n = s.spawn(|| npm::search_npm(query));
-        let b = s.spawn(|| brew::search_brew(query, cache_dir));
-        let p = s.spawn(|| pip::search_pip(query));
+        let n = if sources.npm { Some(s.spawn(|| npm::search_npm(query))) } else { None };
+        let b = if sources.brew { Some(s.spawn(|| brew::search_brew(query, cache_dir))) } else { None };
+        let p = if sources.pip { Some(s.spawn(|| pip::search_pip(query))) } else { None };
         merge(vec![
-            n.join().unwrap_or_default(),
-            b.join().unwrap_or_default(),
-            p.join().unwrap_or_default(),
+            n.map(|h| h.join().unwrap_or_default()).unwrap_or_default(),
+            b.map(|h| h.join().unwrap_or_default()).unwrap_or_default(),
+            p.map(|h| h.join().unwrap_or_default()).unwrap_or_default(),
         ])
     })
 }

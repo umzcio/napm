@@ -185,7 +185,7 @@ pub fn changelog(eco: &str, pkg: &str, version: &str, cache_dir: &Path) -> Vec<S
         // Read the token at call time; store it in a local binding so the reference lives long enough.
         let token_str: String;
         let token_header: String;
-        if let Ok(token) = std::env::var("GITHUB_TOKEN") {
+        if let Some(token) = super::github_token(cache_dir) {
             token_str = token;
             token_header = format!("Bearer {}", token_str);
             headers.push(("Authorization", &token_header));
