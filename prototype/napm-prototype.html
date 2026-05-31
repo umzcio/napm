@@ -430,7 +430,7 @@
               : '<button class="btn rowbtn" data-install="'+esc(p.pkg)+'">Get</button>';
       var fire = p.weeklyDownloads>=5e6 ? ' <span class="fire" title="heavily shared">&#128293;</span>' : '';
       var pipTag = p.eco==="pip" ? ' <span class="exact" title="pip has no search API; matched by exact name">exact match</span>' : '';
-      return '<tr>'+
+      return '<tr data-pkg="'+esc(p.pkg)+'">'+
         '<td class="glyph g-off">&#9834;</td>'+
         '<td class="pkgcell"><b>'+esc(p.name)+'</b>'+fire+pipTag+' <span class="muted">'+esc(p.pkg)+'</span><span class="desc">'+esc(p.description)+'</span></td>'+
         '<td class="user">'+esc(p.version)+'</td>'+
@@ -444,6 +444,28 @@
   resEl.addEventListener("click",function(e){
     var b=e.target.closest("[data-install]"); if(!b) return;
     installPackage(b.dataset.install);
+  });
+  function searchMenu(pkg, x, y){
+    var p=null; for(var k=0;k<SWARM.length;k++) if(SWARM[k].pkg===pkg) p=SWARM[k];
+    if(!p) return;
+    var ru=registryUrl(p.eco,p.pkg);
+    openPopup([
+      {label:"Get / Install", run:function(){ installPackage(p.pkg); }},
+      {label:"Copy package name", run:function(){ copyText(p.pkg); }},
+      {label:"Copy install command", run:function(){ copyText(installCmd(p.eco,p.pkg,p.version)); }},
+      ru?{label:"Open "+p.eco+" page", run:function(){ openExt(ru); }}:null,
+      {sep:true},
+      {label:"Filter swarm to "+p.eco, run:function(){
+        searchSource=p.eco;
+        document.querySelectorAll("#srcChips .chip").forEach(function(c){ c.classList.toggle("on", c.dataset.src===p.eco); });
+        renderSearchResults();
+      }}
+    ], x, y);
+  }
+  resEl.addEventListener("contextmenu",function(e){
+    var tr=e.target.closest("tr[data-pkg]"); if(!tr) return;
+    e.preventDefault();
+    searchMenu(tr.dataset.pkg, e.clientX, e.clientY);
   });
   document.getElementById("srcChips").addEventListener("click",function(e){
     var c=e.target.closest("[data-src]"); if(!c) return;
@@ -694,6 +716,31 @@
     if(p){ e.stopPropagation(); togglePin(+p.dataset.pin); return; }
     var b=e.target.closest("[data-get]");
     if(b){ e.stopPropagation(); var j=+b.dataset.get; queueTransfer(j,TOOLS[j].latest,TOOLS[j].installed?"update":"install"); switchTab("transfers"); }
+  });
+  function libMenu(i, x, y){
+    var t=TOOLS[i]; if(!t) return;
+    var st=statusOf(t);
+    var prev=t.eco!=="brew"?priorVersion(t.pkg,t.eco):null;
+    var ru=registryUrl(t.eco,t.pkg);
+    openPopup([
+      st==="update" ? {label:"Update to "+t.latest, run:function(){ queueTransfer(i,t.latest,"update"); switchTab("transfers"); }}
+        : !t.installed ? {label:"Install", run:function(){ queueTransfer(i,t.latest,"install"); switchTab("transfers"); }}
+        : {label:"Up to date", disabled:function(){return true;}},
+      {label: prev?("Roll back to "+prev):"Roll back", disabled:function(){ return !prev; },
+        run:function(){ if(prev){ queueTransfer(i,prev,"rollback"); switchTab("transfers"); } }},
+      {sep:true},
+      {label: t.pinned?"Unpin":"Pin", run:function(){ togglePin(i); }},
+      {label:"Copy package name", run:function(){ copyText(t.pkg); }},
+      {label:"Copy install command", run:function(){ copyText(installCmd(t.eco,t.pkg,t.installed||t.latest)); }},
+      ru?{label:"Open "+t.eco+" page", run:function(){ openExt(ru); }}:null,
+      {sep:true},
+      {label:"What's New for this", run:function(){ if(!FEED_LOADED) loadWhatsNew(); switchTab("whatsnew"); }}
+    ], x, y);
+  }
+  rowsEl.addEventListener("contextmenu",function(e){
+    var tr=e.target.closest("tr[data-i]"); if(!tr) return;
+    e.preventDefault();
+    libMenu(+tr.dataset.i, e.clientX, e.clientY);
   });
   function switchTab(name){
     document.querySelectorAll(".tab").forEach(function(t){t.classList.toggle("active",t.dataset.view===name);});
