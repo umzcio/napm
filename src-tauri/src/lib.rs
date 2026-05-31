@@ -1,6 +1,7 @@
 mod scan;
 mod store;
 mod ops;
+mod search;
 
 use scan::InstalledTool;
 use store::{HistoryEntry, Store};
