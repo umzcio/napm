@@ -12,41 +12,26 @@ pub fn npx_pkg_name(spec: &str) -> &str {
     }
 }
 
-/// Collapse (name, version, publisher) triples into library rows, deduping by
-/// name and keeping the greatest version string (and that version's publisher).
-/// latest is set equal to installed: in M2 napm does not know the registry
-/// latest for npx tools, so this is a neutral sentinel meaning "freshness
-/// unknown" (rendered as such in the UI).
-pub fn dedup_npx(items: Vec<(String, String, String)>) -> Vec<InstalledTool> {
-    // name -> (version, publisher)
-    let mut map: BTreeMap<String, (String, String)> = BTreeMap::new();
-    for (name, ver, publisher) in items {
-        map.entry(name)
+/// Collapse rows for the same tool (cached in multiple hash dirs), keeping the
+/// one with the greatest installed version.
+pub fn dedup_npx(rows: Vec<InstalledTool>) -> Vec<InstalledTool> {
+    let mut map: BTreeMap<String, InstalledTool> = BTreeMap::new();
+    for row in rows {
+        map.entry(row.pkg.clone())
             .and_modify(|e| {
-                if ver > e.0 {
-                    e.0 = ver.clone();
-                    e.1 = publisher.clone();
+                if row.installed > e.installed {
+                    *e = row.clone();
                 }
             })
-            .or_insert((ver, publisher));
+            .or_insert(row);
     }
-    map.into_iter()
-        .map(|(name, (ver, publisher))| InstalledTool {
-            name: name.clone(),
-            eco: "npx".to_string(),
-            pkg: name,
-            installed: Some(ver.clone()),
-            latest: ver,
-            size: String::new(),
-            pinned: false,
-            publisher,
-        })
-        .collect()
+    map.into_values().collect()
 }
 
 /// Walk ~/.npm/_npx/<hash>/, read each shim's `_npx.packages` to learn which
-/// tool was run, and resolve its cached version from node_modules. Returns
-/// empty if the cache does not exist.
+/// tool was run, and resolve its version/publisher/description/size from the
+/// cached package. `latest` equals `installed` (freshness is unknown for npx
+/// until the registry layer). Returns empty if the cache does not exist.
 pub fn scan_npx() -> Vec<InstalledTool> {
     let home = match std::env::var_os("HOME") {
         Some(h) => h,
@@ -58,7 +43,7 @@ pub fn scan_npx() -> Vec<InstalledTool> {
         Err(_) => return Vec::new(),
     };
 
-    let mut items: Vec<(String, String, String)> = Vec::new();
+    let mut rows: Vec<InstalledTool> = Vec::new();
     for entry in entries.flatten() {
         let dir = entry.path();
         let shim = match fs::read_to_string(dir.join("package.json")) {
@@ -79,27 +64,64 @@ pub fn scan_npx() -> Vec<InstalledTool> {
                 None => continue,
             };
             let name = npx_pkg_name(spec);
-            let pkg_json = dir.join("node_modules").join(name).join("package.json");
-            if let Ok(s) = fs::read_to_string(&pkg_json) {
-                if let Ok(v) = serde_json::from_str::<Value>(&s) {
-                    if let Some(ver) = v.get("version").and_then(|x| x.as_str()) {
-                        let publisher = v
-                            .get("author")
-                            .and_then(super::publisher::author_from_pkg_json)
-                            .and_then(|n| super::publisher::to_handle(&n))
-                            .unwrap_or_default();
-                        items.push((name.to_string(), ver.to_string(), publisher));
-                    }
-                }
-            }
+            let pkg_dir = dir.join("node_modules").join(name);
+            let v: Value = match fs::read_to_string(pkg_dir.join("package.json"))
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+            {
+                Some(v) => v,
+                None => continue,
+            };
+            let ver = match v.get("version").and_then(|x| x.as_str()) {
+                Some(ver) => ver.to_string(),
+                None => continue,
+            };
+            let publisher = v
+                .get("author")
+                .and_then(super::publisher::author_from_pkg_json)
+                .and_then(|n| super::publisher::to_handle(&n))
+                .unwrap_or_default();
+            let description = v
+                .get("description")
+                .and_then(|d| d.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            rows.push(InstalledTool {
+                name: name.to_string(),
+                eco: "npx".to_string(),
+                pkg: name.to_string(),
+                installed: Some(ver.clone()),
+                latest: ver,
+                size: super::size::human_size(super::size::dir_size(&pkg_dir)),
+                pinned: false,
+                publisher,
+                description,
+                updated: super::path_mtime(&pkg_dir),
+            });
         }
     }
-    dedup_npx(items)
+    dedup_npx(rows)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn npx_row(pkg: &str, ver: &str, publisher: &str) -> InstalledTool {
+        InstalledTool {
+            name: pkg.to_string(),
+            eco: "npx".to_string(),
+            pkg: pkg.to_string(),
+            installed: Some(ver.to_string()),
+            latest: ver.to_string(),
+            size: String::new(),
+            pinned: false,
+            publisher: publisher.to_string(),
+            description: String::new(),
+            updated: 0,
+        }
+    }
 
     #[test]
     fn strips_version_from_plain_spec() {
@@ -119,17 +141,16 @@ mod tests {
     }
 
     #[test]
-    fn dedup_keeps_greatest_version_and_tags_npx() {
+    fn dedup_keeps_greatest_version() {
         let rows = dedup_npx(vec![
-            ("tool".to_string(), "1.0.0".to_string(), "alice".to_string()),
-            ("tool".to_string(), "1.2.0".to_string(), "bob".to_string()),
-            ("other".to_string(), "0.1.0".to_string(), "carol".to_string()),
+            npx_row("tool", "1.0.0", "alice"),
+            npx_row("tool", "1.2.0", "bob"),
+            npx_row("other", "0.1.0", "carol"),
         ]);
         assert_eq!(rows.len(), 2);
         let tool = rows.iter().find(|t| t.pkg == "tool").unwrap();
         assert_eq!(tool.eco, "npx");
         assert_eq!(tool.installed.as_deref(), Some("1.2.0"));
-        assert_eq!(tool.latest, "1.2.0");
-        assert_eq!(tool.publisher, "bob"); // publisher of the chosen (greatest) version
+        assert_eq!(tool.publisher, "bob"); // the chosen version's row
     }
 }

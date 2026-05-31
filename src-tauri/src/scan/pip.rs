@@ -65,6 +65,8 @@ pub fn parse_pip(list_json: &str, outdated_json: &str) -> Vec<InstalledTool> {
             size: String::new(),
             pinned: false,
             publisher: String::new(),
+            description: String::new(),
+            updated: 0,
         })
         .collect()
 }
@@ -84,12 +86,19 @@ fn pip_bin() -> Option<&'static str> {
     None
 }
 
-/// Map lowercased package name -> publisher handle, by scanning every
-/// `*.dist-info/METADATA` in python's site-packages directories for `Author`.
-fn pip_publishers() -> BTreeMap<String, String> {
+/// Per-package metadata gathered from a dist-info directory.
+struct PipMeta {
+    publisher: String,
+    description: String,
+    size: String,
+    updated: i64,
+}
+
+/// Map lowercased package name -> metadata, by scanning every `*.dist-info`
+/// directory in python's global and user site-packages (`pip3 install`
+/// defaults to the user site on macOS, so both must be scanned).
+fn pip_metadata() -> BTreeMap<String, PipMeta> {
     let mut map = BTreeMap::new();
-    // Include BOTH the global site-packages and the per-user site-packages
-    // (`pip3 install` defaults to the user site on macOS), or most packages are missed.
     let listing = super::run(
         "python3",
         &[
@@ -106,23 +115,35 @@ fn pip_publishers() -> BTreeMap<String, String> {
             if !entry.file_name().to_string_lossy().ends_with(".dist-info") {
                 continue;
             }
-            let metadata = match std::fs::read_to_string(entry.path().join("METADATA")) {
+            let info_dir = entry.path();
+            let metadata = match std::fs::read_to_string(info_dir.join("METADATA")) {
                 Ok(s) => s,
                 Err(_) => continue,
             };
-            let name = super::publisher::metadata_field(&metadata, "Name");
-            let author = super::publisher::pip_author(&metadata)
-                .and_then(|a| super::publisher::to_handle(&a));
-            if let (Some(n), Some(a)) = (name, author) {
-                map.insert(n.to_lowercase(), a);
-            }
+            let name = match super::publisher::metadata_field(&metadata, "Name") {
+                Some(n) => n,
+                None => continue,
+            };
+            let publisher = super::publisher::pip_author(&metadata)
+                .and_then(|a| super::publisher::to_handle(&a))
+                .unwrap_or_default();
+            let description =
+                super::publisher::metadata_field(&metadata, "Summary").unwrap_or_default();
+            let size = std::fs::read_to_string(info_dir.join("RECORD"))
+                .map(|r| super::size::human_size(super::size::record_total_size(&r)))
+                .unwrap_or_default();
+            let updated = super::path_mtime(&info_dir);
+            map.insert(
+                name.to_lowercase(),
+                PipMeta { publisher, description, size, updated },
+            );
         }
     }
     map
 }
 
-/// Run the real pip commands and merge, then enrich publishers from the
-/// installed dist-info METADATA. Returns empty if no pip is installed.
+/// Run the real pip commands and merge, then enrich publisher, description,
+/// size, and updated time from the installed dist-info. Empty if no pip.
 pub fn scan_pip() -> Vec<InstalledTool> {
     let bin = match pip_bin() {
         Some(b) => b,
@@ -131,10 +152,13 @@ pub fn scan_pip() -> Vec<InstalledTool> {
     let list = super::run(bin, &["list", "--format=json"]);
     let outdated = super::run(bin, &["list", "--outdated", "--format=json"]);
     let mut rows = parse_pip(&list, &outdated);
-    let pubs = pip_publishers();
+    let meta = pip_metadata();
     for row in rows.iter_mut() {
-        if let Some(p) = pubs.get(&row.pkg.to_lowercase()) {
-            row.publisher = p.clone();
+        if let Some(m) = meta.get(&row.pkg.to_lowercase()) {
+            row.publisher = m.publisher.clone();
+            row.description = m.description.clone();
+            row.size = m.size.clone();
+            row.updated = m.updated;
         }
     }
     rows

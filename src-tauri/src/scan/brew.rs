@@ -61,13 +61,16 @@ pub fn parse_brew(list_versions: &str, outdated_json: &str) -> Vec<InstalledTool
             size: String::new(),
             pinned: false,
             publisher: String::new(),
+            description: String::new(),
+            updated: 0,
         })
         .collect()
 }
 
-/// Build a name -> publisher-handle map from `brew info --json=v2 --installed`,
-/// taking the GitHub/GitLab owner of each formula's homepage.
-pub fn parse_brew_publishers(info_json: &str) -> BTreeMap<String, String> {
+/// Build a name -> (publisher-handle, description) map from
+/// `brew info --json=v2 --installed`. Publisher is the GitHub/GitLab owner of
+/// the homepage (else its domain label); description is the formula `desc`.
+pub fn parse_brew_info(info_json: &str) -> BTreeMap<String, (String, String)> {
     let mut map = BTreeMap::new();
     if let Ok(v) = serde_json::from_str::<Value>(info_json) {
         if let Some(formulae) = v.get("formulae").and_then(|f| f.as_array()) {
@@ -77,27 +80,59 @@ pub fn parse_brew_publishers(info_json: &str) -> BTreeMap<String, String> {
                     _ => continue,
                 };
                 let homepage = f.get("homepage").and_then(|h| h.as_str()).unwrap_or("");
-                if let Some(handle) = super::publisher::publisher_from_homepage(homepage)
+                let publisher = super::publisher::publisher_from_homepage(homepage)
                     .and_then(|o| super::publisher::to_handle(&o))
-                {
-                    map.insert(name.to_string(), handle);
-                }
+                    .unwrap_or_default();
+                let desc = f
+                    .get("desc")
+                    .and_then(|d| d.as_str())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                map.insert(name.to_string(), (publisher, desc));
             }
         }
     }
     map
 }
 
-/// Run the real brew commands and merge, then enrich publishers from
-/// `brew info --json=v2 --installed`.
+/// Recorded install time of a keg from its INSTALL_RECEIPT.json `time`, falling
+/// back to the keg directory's mtime.
+fn brew_install_time(keg: &std::path::Path) -> i64 {
+    if let Ok(s) = std::fs::read_to_string(keg.join("INSTALL_RECEIPT.json")) {
+        if let Ok(v) = serde_json::from_str::<Value>(&s) {
+            if let Some(t) = v.get("time").and_then(|x| x.as_i64()) {
+                return t;
+            }
+        }
+    }
+    super::path_mtime(keg)
+}
+
+/// Run the real brew commands and merge, then enrich publisher, description,
+/// size (the installed keg), and install time.
 pub fn scan_brew() -> Vec<InstalledTool> {
     let list = super::run("brew", &["list", "--versions"]);
     let outdated = super::run("brew", &["outdated", "--json=v2"]);
     let mut rows = parse_brew(&list, &outdated);
-    let pubs = parse_brew_publishers(&super::run("brew", &["info", "--json=v2", "--installed"]));
+
+    let meta = parse_brew_info(&super::run("brew", &["info", "--json=v2", "--installed"]));
+    let prefix = super::run("brew", &["--prefix"]);
+    let prefix = prefix.trim();
     for row in rows.iter_mut() {
-        if let Some(p) = pubs.get(&row.pkg) {
-            row.publisher = p.clone();
+        if let Some((publisher, desc)) = meta.get(&row.pkg) {
+            row.publisher = publisher.clone();
+            row.description = desc.clone();
+        }
+        if !prefix.is_empty() {
+            if let Some(ver) = &row.installed {
+                let keg = std::path::Path::new(prefix)
+                    .join("Cellar")
+                    .join(&row.pkg)
+                    .join(ver);
+                row.size = super::size::human_size(super::size::dir_size(&keg));
+                row.updated = brew_install_time(&keg);
+            }
         }
     }
     rows
@@ -141,13 +176,15 @@ mod tests {
     }
 
     #[test]
-    fn publisher_comes_from_formula_homepage() {
+    fn info_yields_publisher_and_description() {
         let info = r#"{"formulae":[
-            {"name":"ripgrep","homepage":"https://github.com/BurntSushi/ripgrep"},
-            {"name":"openssl","homepage":"https://www.openssl.org/"}
+            {"name":"ripgrep","desc":"Search tool like grep","homepage":"https://github.com/BurntSushi/ripgrep"},
+            {"name":"openssl","desc":"Cryptography toolkit","homepage":"https://www.openssl.org/"}
         ]}"#;
-        let pubs = parse_brew_publishers(info);
-        assert_eq!(pubs.get("ripgrep").map(|s| s.as_str()), Some("burntsushi"));
-        assert_eq!(pubs.get("openssl").map(|s| s.as_str()), Some("openssl")); // domain fallback
+        let meta = parse_brew_info(info);
+        let rg = meta.get("ripgrep").unwrap();
+        assert_eq!(rg.0, "burntsushi");
+        assert_eq!(rg.1, "Search tool like grep");
+        assert_eq!(meta.get("openssl").unwrap().0, "openssl"); // domain fallback
     }
 }

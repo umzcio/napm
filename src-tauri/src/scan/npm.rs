@@ -55,6 +55,8 @@ pub fn parse_npm(ls_json: &str, outdated_json: &str) -> Vec<InstalledTool> {
             size: String::new(),
             pinned: false,
             publisher: String::new(),
+            description: String::new(),
+            updated: 0,
         })
         .collect()
 }
@@ -65,14 +67,13 @@ pub fn scan_npm() -> Vec<InstalledTool> {
     let ls = super::run("npm", &["ls", "-g", "--depth=0", "--json"]);
     let outdated = super::run("npm", &["outdated", "-g", "--json"]);
     let mut rows = parse_npm(&ls, &outdated);
-    enrich_publishers(&mut rows);
+    enrich(&mut rows);
     rows
 }
 
-/// Fill in each row's `publisher` from the installed package's package.json
-/// `author`, read out of the global npm root. Best-effort: unreadable or
-/// authorless packages keep an empty publisher.
-fn enrich_publishers(rows: &mut [InstalledTool]) {
+/// Fill in each row's publisher, description, size, and updated time from the
+/// installed package on disk (under the global npm root). Best-effort.
+fn enrich(rows: &mut [InstalledTool]) {
     let root = super::run("npm", &["root", "-g"]);
     let root = root.trim();
     if root.is_empty() {
@@ -80,8 +81,8 @@ fn enrich_publishers(rows: &mut [InstalledTool]) {
     }
     let base = std::path::Path::new(root);
     for row in rows.iter_mut() {
-        let pkg_json = base.join(&row.pkg).join("package.json");
-        if let Ok(s) = std::fs::read_to_string(&pkg_json) {
+        let dir = base.join(&row.pkg);
+        if let Ok(s) = std::fs::read_to_string(dir.join("package.json")) {
             if let Ok(v) = serde_json::from_str::<Value>(&s) {
                 if let Some(p) = v
                     .get("author")
@@ -90,8 +91,13 @@ fn enrich_publishers(rows: &mut [InstalledTool]) {
                 {
                     row.publisher = p;
                 }
+                if let Some(d) = v.get("description").and_then(|x| x.as_str()) {
+                    row.description = d.trim().to_string();
+                }
             }
         }
+        row.size = super::size::human_size(super::size::dir_size(&dir));
+        row.updated = super::path_mtime(&dir);
     }
 }
 
