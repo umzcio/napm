@@ -87,10 +87,49 @@ fn get_advisory(id: String) -> Option<intel::Advisory> {
     })
 }
 
+#[tauri::command]
+fn open_data_dir(app: tauri::AppHandle) {
+    let dir = app.path().app_data_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::process::Command::new("open").arg(&dir).spawn();
+}
+
+#[tauri::command]
+fn open_external(url: String) {
+    // Only open web URLs, never arbitrary local paths or args.
+    if url.starts_with("https://") || url.starts_with("http://") {
+        let _ = std::process::Command::new("open").arg(&url).spawn();
+    }
+}
+
+#[tauri::command]
+fn clear_caches(app: tauri::AppHandle) {
+    let dir = app.path().app_data_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    for name in ["brew_catalog.json", "brew_analytics.json", "wire.json"] {
+        let _ = std::fs::remove_file(dir.join(name));
+    }
+    // Remove the per-version changelog caches (changelog_*.json).
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for e in entries.flatten() {
+            let n = e.file_name();
+            let n = n.to_string_lossy();
+            if n.starts_with("changelog_") && n.ends_with(".json") {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+    // Re-warm the brew catalog in the background so the next search is not cold.
+    std::thread::spawn(move || {
+        let d = app.path().app_data_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let _ = std::fs::create_dir_all(&d);
+        search::brew::warm_brew(&d);
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
-    .invoke_handler(tauri::generate_handler![scan_installed, set_pin, get_history, run_op, search_registry, get_whats_new, get_changelog, get_advisory])
+    .invoke_handler(tauri::generate_handler![scan_installed, set_pin, get_history, run_op, search_registry, get_whats_new, get_changelog, get_advisory, open_data_dir, open_external, clear_caches])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
