@@ -79,7 +79,11 @@ pub fn fetch_wire(cache_dir: &Path) -> Option<Vec<WireItem>> {
     }
 
     // Sort by published descending (ISO timestamps sort correctly as strings).
-    merged.sort_by(|a, b| b.published.cmp(&a.published));
+    // Items with an empty published string sort LAST (treat "" as oldest).
+    merged.sort_by(|a, b| {
+        let key = |w: &WireItem| (!w.published.is_empty(), w.published.clone());
+        key(b).cmp(&key(a))
+    });
     merged.truncate(15);
 
     // Cache the merged vec.

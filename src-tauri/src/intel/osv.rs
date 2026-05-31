@@ -58,7 +58,11 @@ pub fn scan_security(installed: &[ToolRef]) -> Option<Vec<SecurityAlert>> {
     // Build queries only for tools with a supported ecosystem and an installed version.
     let eligible: Vec<(&ToolRef, &'static str)> = installed.iter().filter_map(|t| {
         let eco = osv_ecosystem(&t.eco)?;
-        let _ = t.installed.as_ref()?;
+        // Reject tools with no installed version or an empty installed version string.
+        // OSV with an empty version returns all advisories for the package, which
+        // would be misleading and potentially very noisy.
+        let ver = t.installed.as_deref()?;
+        if ver.is_empty() { return None; }
         Some((t, eco))
     }).collect();
 
@@ -85,11 +89,15 @@ pub fn scan_security(installed: &[ToolRef]) -> Option<Vec<SecurityAlert>> {
         return None;
     }
 
-    // Collect (tool, first_id) pairs for those with advisories.
+    // Collect (tool, chosen_id) pairs for those with advisories.
+    // If any id in the list starts with "MAL-", use that (malicious takes priority
+    // over a co-listed GHSA); otherwise fall back to the first id.
     let flagged: Vec<(&ToolRef, String)> = eligible.iter().enumerate().filter_map(|(i, (t, _eco))| {
         let ids = id_lists.get(i)?;
-        let first = ids.first()?.clone();
-        Some((*t, first))
+        if ids.is_empty() { return None; }
+        let chosen = ids.iter().find(|id| id.starts_with("MAL-"))
+            .or_else(|| ids.first())?.clone();
+        Some((*t, chosen))
     }).collect();
 
     // Severity is encoded in the advisory id (MAL- = malicious), so it needs no

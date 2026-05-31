@@ -53,7 +53,7 @@ pub fn age_verdict(published: Option<i64>, now: i64) -> (String, String) {
     let label = if days < 1 { "released today".to_string() }
         else if days == 1 { "released 1 day ago".to_string() }
         else { format!("released {} days ago", days) };
-    let rec = if days >= 7 { "safe" } else { "new" };
+    let rec = if days > 7 { "safe" } else { "new" };
     (rec.to_string(), label)
 }
 
@@ -117,9 +117,12 @@ pub fn release_age(eco: &str, pkg: &str, version: &str, now: i64) -> (String, St
 /// Cache is permanent (one write per unique version). Any failure returns
 /// Vec::new(). Caches empty results too, to avoid re-hitting a rate limit.
 pub fn changelog(eco: &str, pkg: &str, version: &str, cache_dir: &Path) -> Vec<String> {
-    // Build a filesystem-safe cache key.
-    let safe_pkg = pkg.replace(['/', '@'], "_");
-    let cache_file = cache_dir.join(format!("changelog_{}_{}_{}.json", eco, safe_pkg, version));
+    // Build a filesystem-safe cache key. Sanitize eco, pkg, and version to
+    // prevent path traversal via frontend-supplied strings.
+    let safe_eco = eco.replace(['/', '\\'], "_").replace("..", "_");
+    let safe_pkg = pkg.replace(['/', '@', '\\'], "_").replace("..", "_");
+    let safe_ver = version.replace(['/', '\\'], "_").replace("..", "_");
+    let cache_file = cache_dir.join(format!("changelog_{}_{}_{}.json", safe_eco, safe_pkg, safe_ver));
 
     // Return cached result if it exists (permanent cache per version).
     if let Ok(s) = std::fs::read_to_string(&cache_file) {
@@ -170,7 +173,9 @@ pub fn changelog(eco: &str, pkg: &str, version: &str, cache_dir: &Path) -> Vec<S
         _ => None,
     };
 
-    let result: Vec<String> = (|| {
+    // fetch_result: Ok(vec) means the HTTP call succeeded (notes may be empty);
+    // Err(()) means the HTTP call itself failed (network / non-2xx).
+    let fetch_result: Result<Vec<String>, ()> = (|| {
         let (owner, repo) = github_repo_from_url(repo_url.as_deref()?)?;
         let releases_url = format!(
             "https://api.github.com/repos/{}/{}/releases?per_page=20",
@@ -185,16 +190,26 @@ pub fn changelog(eco: &str, pkg: &str, version: &str, cache_dir: &Path) -> Vec<S
             token_header = format!("Bearer {}", token_str);
             headers.push(("Authorization", &token_header));
         }
+        // Propagate HTTP errors as None so the outer closure returns None -> Err(()).
         let body = crate::http::get_with_headers(&releases_url, &headers).ok()?;
         Some(parse_github_releases(&body, version))
-    })().unwrap_or_default();
+    })().map(Ok).unwrap_or(Err(()));
 
-    // Cache the result (even if empty) to avoid re-hitting the API.
-    if let Ok(s) = serde_json::to_string(&result) {
-        let _ = std::fs::write(&cache_file, s);
+    match fetch_result {
+        Ok(result) => {
+            // Successful HTTP response: cache even if no matching release notes were
+            // found (a legitimate empty result), to avoid hammering the API.
+            if let Ok(s) = serde_json::to_string(&result) {
+                let _ = std::fs::write(&cache_file, s);
+            }
+            result
+        }
+        Err(()) => {
+            // HTTP call failed (network error, rate-limit, etc.): do NOT cache so
+            // the next run retries.
+            Vec::new()
+        }
     }
-
-    result
 }
 
 #[cfg(test)]
@@ -223,6 +238,12 @@ mod tests {
         let (rec2, _) = age_verdict(Some(now - 3 * 86400), now);
         assert_eq!(rec2, "new");
         assert_eq!(age_verdict(None, now).0, "unknown");
+        // Boundary: exactly 7 days is "new" (spec: "more than 7 days" = safe).
+        let (rec7, _) = age_verdict(Some(now - 7 * 86400), now);
+        assert_eq!(rec7, "new");
+        // Exactly 8 days is "safe".
+        let (rec8, _) = age_verdict(Some(now - 8 * 86400), now);
+        assert_eq!(rec8, "safe");
     }
 
     #[test]

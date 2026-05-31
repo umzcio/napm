@@ -81,14 +81,24 @@ pub fn whats_new(installed: &[ToolRef], verdict_scope: &[String], cache_dir: &Pa
         let sec = s.spawn(|| osv::scan_security(installed));
         let wir = s.spawn(|| wire::fetch_wire(cache_dir));
         let ver = s.spawn(|| {
-            verdict_scope.iter().filter_map(|pkg| {
-                let t = installed.iter().find(|t| &t.pkg == pkg)?;
-                let (rec, age_label) = release::release_age(&t.eco, &t.pkg, &t.latest, now);
-                Some(ReleaseInfo {
-                    pkg: t.pkg.clone(), eco: t.eco.clone(), version: t.latest.clone(),
-                    age_label, recommendation: rec,
-                })
-            }).collect::<Vec<_>>()
+            // Resolve the tool refs for each requested pkg first (sequential, cheap).
+            let scope_tools: Vec<&ToolRef> = verdict_scope.iter().filter_map(|pkg| {
+                installed.iter().find(|t| &t.pkg == pkg)
+            }).collect();
+            // Fetch release ages in parallel so wall-clock is the slowest single
+            // fetch rather than the sum of all fetches.
+            std::thread::scope(|inner| {
+                let handles: Vec<_> = scope_tools.iter().map(|t| {
+                    let eco = t.eco.clone();
+                    let pkg = t.pkg.clone();
+                    let ver = t.latest.clone();
+                    inner.spawn(move || -> ReleaseInfo {
+                        let (rec, age_label) = release::release_age(&eco, &pkg, &ver, now);
+                        ReleaseInfo { pkg, eco, version: ver, age_label, recommendation: rec }
+                    })
+                }).collect();
+                handles.into_iter().filter_map(|h| h.join().ok()).collect::<Vec<_>>()
+            })
         });
 
         let sec = sec.join().unwrap_or(None);
@@ -99,9 +109,12 @@ pub fn whats_new(installed: &[ToolRef], verdict_scope: &[String], cache_dir: &Pa
             Some(a) => (a, true),
             None => (Vec::new(), false),
         };
-        // Drop verdicts that are already covered by a security alert.
-        let flagged: std::collections::BTreeSet<&str> = alerts.iter().map(|a| a.pkg.as_str()).collect();
-        verdicts.retain(|v| !flagged.contains(v.pkg.as_str()));
+        // Drop verdicts that are already covered by a security alert. Key on
+        // (eco, pkg) so a same-name package in two different ecosystems is not
+        // incorrectly suppressed by an alert in only one of them.
+        let flagged: std::collections::BTreeSet<(&str, &str)> =
+            alerts.iter().map(|a| (a.eco.as_str(), a.pkg.as_str())).collect();
+        verdicts.retain(|v| !flagged.contains(&(v.eco.as_str(), v.pkg.as_str())));
 
         let (wire, wire_ok) = match wir {
             Some(w) => (w, true),
