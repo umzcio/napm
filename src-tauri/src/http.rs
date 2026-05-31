@@ -27,6 +27,14 @@ pub(crate) fn get(url: &str) -> Result<String, String> {
     }
 }
 
+/// POST a JSON body and return the response string, sharing the same agent.
+pub(crate) fn post_json(url: &str, body: &str) -> Result<String, String> {
+    match agent().post(url).set("Content-Type", "application/json").send_string(body) {
+        Ok(resp) => resp.into_string().map_err(|e| e.to_string()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 /// Percent-encode a query value (encode everything except RFC 3986 unreserved).
 pub(crate) fn encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
