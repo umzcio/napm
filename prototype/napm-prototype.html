@@ -119,6 +119,10 @@
   .xfer-top .from{flex:1; font-family:var(--mono); font-size:14px; color:var(--navy);}
   .xfer-top .kbps{width:78px; text-align:right; font-family:var(--mono); font-size:14px; color:var(--dgray);}
   .cmd{font-family:var(--mono); font-size:14px; color:var(--ddgray); margin:3px 0 5px;}
+  .xout{font-family:var(--mono); font-size:13px; line-height:1.25; background:#fff; color:var(--ddgray);
+    height:84px; overflow:auto; padding:3px 5px; white-space:pre-wrap; word-break:break-word;}
+  .xout .err{color:var(--red);}
+  .xstat{font-weight:bold; margin-top:3px;} .xstat.ok{color:var(--green);} .xstat.fail{color:var(--red);}
   .pbar{height:16px; background:#fff; position:relative; overflow:hidden;}
   .pbar .fill{height:100%; width:0; background-color:var(--navy);
     background-image:repeating-linear-gradient(90deg,transparent 0 9px, rgba(255,255,255,.25) 9px 11px);
@@ -425,48 +429,56 @@
     else{ xferListEl.innerHTML="";
       xfers.forEach(function(x){
         var d=document.createElement("div"); d.className="xfer-row raised";
-        d.innerHTML='<div class="xfer-top"><div class="name">'+x.name+'</div><div class="from">@'+x.user+'</div>'+
-          '<div class="kbps">'+(x.done?"done":x.kbps+" KB/s")+'</div></div>'+
-          '<div class="cmd">$ '+x.cmd+'</div>'+
-          '<div class="pbar sunken"><div class="fill" style="width:'+x.pct+'%"></div><div class="pct">'+(x.done?"complete":x.pct+"%")+'</div></div>';
+        var body=x.lines.map(function(l){ return '<span class="'+(l.stream==="stderr"?"err":"")+'">'+esc(l.line)+'</span>'; }).join("\n");
+        var stat=x.done?('<div class="xstat '+(x.ok?"ok":"fail")+'">'+(x.ok?"✓ complete":"✗ failed")+'</div>'):"";
+        d.innerHTML='<div class="xfer-top"><div class="name">'+esc(x.name)+'</div><div class="from">@'+esc(x.user)+'</div>'+
+          '<div class="kbps">'+(x.done?(x.ok?"done":"error"):"running")+'</div></div>'+
+          '<div class="cmd">$ '+esc(x.cmd)+'</div>'+
+          '<div class="xout">'+body+'</div>'+stat;
         xferListEl.appendChild(d);
       });
     }
     var active=xfers.filter(function(x){return !x.done;}).length;
     badge.textContent=active; badge.style.display=active?"":"none";
   }
-  function renderHistory(){
-    if(!history.length){ histWrap.innerHTML='<div class="empty">No version changes yet.</div>'; return; }
-    var rows=history.map(function(h,i){
+  function loadHistory(){
+    var inv=window.__TAURI__&&window.__TAURI__.core&&window.__TAURI__.core.invoke;
+    if(!inv){ renderHistory([]); return; }
+    inv("get_history").then(function(h){ renderHistory(h||[]); }).catch(function(){ renderHistory([]); });
+  }
+  function renderHistory(hist){
+    if(!hist || !hist.length){ histWrap.innerHTML='<div class="empty">No version changes yet.</div>'; return; }
+    var rows=hist.map(function(h){
       var label=h.action==="update"?"updated":h.action==="rollback"?"rolled back":"installed";
-      var rb=h.action!=="rollback"?'<button class="btn rowbtn" data-roll="'+i+'">Roll back</button>':'<span class="muted">\u2014</span>';
-      return '<tr><td class="t">'+h.time+'</td><td><b>'+h.name+'</b></td><td class="act-'+h.action+'">'+label+'</td>'+
-        '<td class="user">'+(h.from||"\u2014")+' \u2192 '+h.to+'</td><td>'+rb+'</td></tr>';
+      var canRoll = h.action!=="rollback" && h.from && h.eco!=="brew";
+      var rb=canRoll?'<button class="btn rowbtn" data-roll-pkg="'+esc(h.pkg)+'" data-roll-eco="'+esc(h.eco)+'" data-roll-from="'+esc(h.from)+'">Roll back</button>'
+                    :'<span class="muted" title="'+(h.eco==="brew"?"Homebrew cannot downgrade":"")+'">\u2014</span>';
+      var when=new Date(h.ts*1000).toLocaleString([], {month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
+      return '<tr><td class="t">'+esc(when)+'</td><td><b>'+esc(h.pkg)+'</b></td><td class="act-'+esc(h.action)+'">'+label+'</td>'+
+        '<td class="user">'+esc(h.from||"\u2014")+' \u2192 '+esc(h.to)+'</td><td>'+rb+'</td></tr>';
     }).join("");
     histWrap.innerHTML='<table class="hist"><tbody>'+rows+'</tbody></table>';
   }
-  histWrap.addEventListener("click",function(e){ var b=e.target.closest("[data-roll]"); if(!b) return;
-    var h=history[+b.dataset.roll]; queueTransfer(h.ti,h.from,"rollback"); switchTab("transfers"); });
-  function addHistory(ti,action,from,to){
-    history.unshift({ti:ti,name:TOOLS[ti].name,action:action,from:from,to:to,
-      time:new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})});
-    renderHistory();
-  }
+  histWrap.addEventListener("click",function(e){
+    var b=e.target.closest("[data-roll-pkg]"); if(!b) return;
+    var pkg=b.dataset.rollPkg, eco=b.dataset.rollEco, fromV=b.dataset.rollFrom;
+    var ti=findTool(pkg); if(ti<0) return;
+    queueTransfer(ti, fromV, "rollback"); switchTab("transfers");
+  });
+  var opSeq=0;
   function queueTransfer(ti,target,action){
     var t=TOOLS[ti], from=t.installed;
-    var cmd=(t.eco==="npm"?"npm i -g "+t.pkg+"@"+target:t.eco==="brew"?"brew install "+t.pkg+"@"+target:"pip install "+t.pkg+"=="+target);
-    var x={name:t.name,user:t.user,pct:0,kbps:0,done:false,cmd:cmd};
-    xfers.push(x); renderXfers();
-    var base=30+(ping(t.name)%50);
-    var iv=setInterval(function(){
-      x.pct+=Math.max(1,Math.round(Math.random()*8)); x.kbps=base+Math.round(Math.random()*40);
-      if(x.pct>=100){ x.pct=100; x.done=true; clearInterval(iv);
-        t.installed=target; addHistory(ti,action,from,target); renderRows();
-        if(lastQuery) renderSearchResults();
-        setTimeout(function(){ xfers=xfers.filter(function(z){return z!==x;}); renderXfers(); },2500);
-      }
-      renderXfers();
-    },200);
+    var cmd=(t.eco==="npm"?"npm i -g "+t.pkg+"@"+target
+           :t.eco==="pip"?"pip install "+t.pkg+"=="+target
+           :t.eco==="brew"?"brew install "+t.pkg
+           :"npm i -g "+t.pkg);
+    var opId="op"+(++opSeq);
+    var x={opId:opId,ti:ti,name:t.name,user:t.publisher||"unknown",cmd:cmd,lines:[],done:false,ok:false,
+           action:action,from:from,to:target};
+    xfers.unshift(x); renderXfers();
+    var inv=window.__TAURI__&&window.__TAURI__.core&&window.__TAURI__.core.invoke;
+    if(!inv){ x.done=true; x.ok=false; x.lines.push({stream:"stderr",line:"(not running in napm)"}); renderXfers(); return; }
+    inv("run_op",{opId:opId,eco:t.eco,pkg:t.pkg,from:from,to:target,action:action});
   }
 
   // ---- EVENTS / TABS / DRAG / SPLASH ------------------------------------
@@ -477,7 +489,11 @@
   });
   rowsEl.addEventListener("click",function(e){
     var p=e.target.closest("[data-pin]");
-    if(p){ e.stopPropagation(); var i=+p.dataset.pin; TOOLS[i].pinned=!TOOLS[i].pinned; renderRows(); return; }
+    if(p){ e.stopPropagation(); var i=+p.dataset.pin; var nowPinned=!TOOLS[i].pinned;
+      TOOLS[i].pinned=nowPinned; renderRows();
+      var inv=window.__TAURI__&&window.__TAURI__.core&&window.__TAURI__.core.invoke;
+      if(inv) inv("set_pin",{pkg:TOOLS[i].pkg,pinned:nowPinned});
+      return; }
     var b=e.target.closest("[data-get]");
     if(b){ e.stopPropagation(); var j=+b.dataset.get; queueTransfer(j,TOOLS[j].latest,TOOLS[j].installed?"update":"install"); switchTab("transfers"); }
   });
@@ -529,7 +545,23 @@
       renderRows();
     });
   })();
-  renderXfers(); renderHistory(); runSearch(""); nextStep(); scanLibrary();
+  (function(){
+    var ev=window.__TAURI__&&window.__TAURI__.event;
+    if(!ev) return;
+    ev.listen("transfer-line",function(e){
+      var x=xfers.find(function(z){return z.opId===e.payload.op_id;});
+      if(x){ x.lines.push({stream:e.payload.stream,line:e.payload.line}); renderXfers(); }
+    });
+    ev.listen("transfer-done",function(e){
+      var x=xfers.find(function(z){return z.opId===e.payload.op_id;});
+      if(!x) return;
+      x.done=true; x.ok=e.payload.success;
+      if(x.ok && x.ti!=null && TOOLS[x.ti]){ TOOLS[x.ti].installed=x.to; }
+      renderXfers(); renderRows();
+      loadHistory();
+    });
+  })();
+  renderXfers(); loadHistory(); runSearch(""); nextStep(); scanLibrary();
 })();
 </script>
 </body>
