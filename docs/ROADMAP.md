@@ -123,27 +123,66 @@ close, checks for toggles and dots for the sort radio).
   unknown -> shown) and three thin commands (`open_data_dir`, `open_external`
   https-only, `clear_caches`). No new plugins; `open` via std::process.
 
-Deferred to a dedicated Preferences / Settings milestone: the Preferences dialog
-and the persisted settings store (GitHub token field, default-appetite setting,
+Deferred to M7 (Preferences / Settings, now next): the Preferences dialog and the
+persisted settings store (GitHub token field, default-appetite setting,
 enable/disable sources), plus Export library (JSON / Markdown), Keyboard
 Shortcuts, and Alt+letter mnemonics.
 
-## Next: M7 - Packaging
+Ordering note: Packaging moved to the back (now M10) so feature work continues
+while the app stays local and fast to iterate. The signed .app comes once the
+feature set is settled.
 
-A real signed/bundled macOS `.app` for daily use.
+## Next: M7 - Preferences / Settings
 
-- Fix the bundle identifier (currently `com.tauri.dev` -> `com.napm.app`).
-- Resolve the npm/brew PATH for Finder-launched apps (dev inherits the terminal
-  PATH; a bundled app may not).
-- Set the real shipping version in `tauri.conf.json` / `Cargo.toml`. The titlebar
-  wordmark now reads it live (`napm v<version>`), so packaging is the single place
-  that version is set and it flows everywhere.
-- The npstr logo icon (`icons/icon.icns`, already generated and configured) only
-  embeds in a packaged `.app`. In `tauri dev` the unbundled binary has no icon, so
-  the Dock, Finder, and the About panel show a generic placeholder. Verify the
-  packaged build shows the npstr logo in all three.
+A persisted settings store plus a Win98 Preferences dialog, and the Export action
+the M6 File menu pointed at. Promoted ahead of packaging so feature work keeps
+moving while the app stays local.
 
-## M8 - Manual / standalone installs (best-effort source)
+- **Settings store:** a small persisted store (JSON in the app-data dir, like
+  pins/history), read at launch.
+- **Preferences dialog** (reuse the M6 modal chrome): default appetite (the dial's
+  starting level), a GitHub token field (raises the API rate limit for changelogs
+  and the wire; today it is env-var only), and enable/disable sources
+  (npm/brew/pip/npx) so a scan can skip ecosystems you do not use.
+- **Wire the settings through:** the default appetite seeds the dial; the token is
+  passed to the intel HTTP calls; disabled sources are skipped by `scan_all` and
+  the federated search.
+- **Export library:** File -> Export (JSON / Markdown), writing the current
+  library to a file the user picks. The deferred File menu item from M6.
+
+## M8 - Right-click context menus (throughout)
+
+Right-click anywhere meaningful and get a Win98-style beveled context menu of
+the actions that apply to whatever was clicked. This is deeply period-accurate
+(the old file-sharing clients leaned on right-click menus) and it is the fastest
+path to actions that are currently buried in row buttons or not exposed at all.
+Pairs with M6: reuse the same beveled menu chrome the menu bar uses.
+
+Every item must do something real. Disabled items are allowed only when honestly
+unavailable (e.g. brew rollback), shown greyed with a reason, never as filler.
+
+Per surface, the menu is context-aware:
+
+- **Library row:** Get / Update or Install (mirrors the row button); Roll back to
+  a previous version (gated for brew, as today); Pin / Unpin; Copy package name;
+  Copy the exact install command; Open homepage / repo (from the publisher
+  metadata already scanned); jump to this tool's What's New card.
+- **Search result:** Get / Install; Copy package name; Copy install command; Open
+  the registry page (npmjs.org / formulae.brew.sh / pypi.org); filter the swarm
+  to this source.
+- **Transfers row:** Copy the streamed log output; Re-run; Roll back to this
+  version; Copy the from -> to.
+- **History entry:** Roll back to this version; Copy the entry; jump to the tool
+  in the library.
+
+Build notes: one reusable context-menu component (positioned at the cursor,
+dismiss on outside-mousedown / Escape, stays inside the window bounds), fed a
+per-surface action list. Actions route through the existing commands (install via
+the M3 Transfers path, pins via `set_pin`, etc.); "Open ..." links use the
+`open_external` command with the homepage/repo from the scanned metadata. No
+shell logic in the frontend.
+
+## M9 - Manual / standalone installs (best-effort source)
 
 A fifth source for tools installed outside any package manager - the ones
 dropped by `curl | bash` install scripts or direct downloads. Examples on the
@@ -170,37 +209,20 @@ the pip search gap):
 Scope: list the tool and a best-effort version, mark the source clearly as
 "manual / unmanaged," and be honest that updates are mostly out of napm's hands.
 
-## M9 - Right-click context menus (throughout)
+## M10 - Packaging
 
-Right-click anywhere meaningful and get a Win98-style beveled context menu of
-the actions that apply to whatever was clicked. This is deeply period-accurate
-(the old file-sharing clients leaned on right-click menus) and it is the fastest
-path to actions that are currently buried in row buttons or not exposed at all.
-Pairs with M6: reuse the same beveled menu chrome the menu bar uses.
+A real signed/bundled macOS `.app` for daily use.
 
-Every item must do something real. Disabled items are allowed only when honestly
-unavailable (e.g. brew rollback), shown greyed with a reason, never as filler.
-
-Per surface, the menu is context-aware:
-
-- **Library row:** Get / Update or Install (mirrors the row button); Roll back to
-  a previous version (gated for brew, as today); Pin / Unpin; Copy package name;
-  Copy the exact install command; Open homepage / repo (from the publisher
-  metadata already scanned); jump to this tool's What's New card (once M5 lands).
-- **Search result:** Get / Install; Copy package name; Copy install command; Open
-  the registry page (npmjs.org / formulae.brew.sh / pypi.org); filter the swarm
-  to this source.
-- **Transfers row:** Copy the streamed log output; Re-run; Roll back to this
-  version; Copy the from -> to.
-- **History entry:** Roll back to this version; Copy the entry; jump to the tool
-  in the library.
-
-Build notes: one reusable context-menu component (positioned at the cursor,
-dismiss on outside-click / Escape, stays inside the window bounds), fed a
-per-surface action list. Actions route through the existing commands (install via
-the M3 Transfers path, pins via `set_pin`, etc.); "Open ..." links need a real
-URL, so surface the homepage/repo from the scanned metadata rather than guessing.
-No shell logic in the frontend.
+- Fix the bundle identifier (currently `com.tauri.dev` -> `com.napm.app`).
+- Resolve the npm/brew PATH for Finder-launched apps (dev inherits the terminal
+  PATH; a bundled app may not).
+- Set the real shipping version in `tauri.conf.json` / `Cargo.toml`. The titlebar
+  wordmark now reads it live (`napm v<version>`), so packaging is the single place
+  that version is set and it flows everywhere.
+- The npstr logo icon (`icons/icon.icns`, already generated and configured) only
+  embeds in a packaged `.app`. In `tauri dev` the unbundled binary has no icon, so
+  the Dock, Finder, and the About panel show a generic placeholder. Verify the
+  packaged build shows the npstr logo in all three.
 
 ## Deferred on purpose
 
