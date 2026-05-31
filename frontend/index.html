@@ -606,6 +606,7 @@
     return "npm i -g "+pkg+(version?"@"+version:""); // npm / npx
   }
   function openExt(url){ var i=inv(); if(i && url) i("open_external",{url:url}); }
+  function revealPath(p){ var i=inv(); if(i && p) i("reveal_in_finder",{path:p}); }
   // Most recent prior version for a tool from the loaded history (newest-first),
   // used by the library Roll back item. Null when none.
   function priorVersion(pkg, eco){
@@ -761,6 +762,16 @@
   });
   function libMenu(i, x, y){
     var t=TOOLS[i]; if(!t) return;
+    if(t.eco==="manual"){
+      openPopup([
+        {label:"Reveal in Finder", disabled:function(){ return !t.description; }, run:function(){ revealPath(t.description); }},
+        {label:"Copy path", disabled:function(){ return !t.description; }, run:function(){ copyText(t.description); }},
+        {label:"Copy name", run:function(){ copyText(t.name); }},
+        {sep:true},
+        {label:"Copy version", disabled:function(){ return !t.installed; }, run:function(){ copyText(t.installed); }}
+      ], x, y);
+      return;
+    }
     var st=statusOf(t), npx=t.eco==="npx", brew=t.eco==="brew";
     var prev=!brew?priorVersion(t.pkg,t.eco):null;
     var ru=registryUrl(t.eco,t.pkg);
