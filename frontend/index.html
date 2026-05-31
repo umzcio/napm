@@ -759,10 +759,26 @@
     copyText([t.name+" ("+t.eco+")", "package: "+t.pkg, "installed: "+(t.installed||"-"),
       "latest: "+t.latest, "publisher: @"+(t.publisher||"unknown"), "size: "+(t.size||"-")].join("\n"));
   }
+  function exportLibrary(format){
+    var i=inv(); if(!i) return;
+    var date=new Date().toISOString().slice(0,10);
+    var content, fn;
+    if(format==="markdown"){
+      fn="napm-library-"+date+".md";
+      content="# napm library ("+date+")\n\n| Tool | Source | Installed | Latest | Publisher | Size |\n|---|---|---|---|---|---|\n"+
+        TOOLS.map(function(t){ return "| "+t.name+" | "+t.eco+" | "+(t.installed||"-")+" | "+t.latest+" | @"+(t.publisher||"unknown")+" | "+(t.size||"-")+" |"; }).join("\n")+"\n";
+    } else {
+      fn="napm-library-"+date+".json";
+      content=JSON.stringify(TOOLS, null, 2);
+    }
+    i("export_library",{filename:fn, content:content});
+  }
   var MENUS = {
     file: [
       {label:"Rescan now", run:function(){ scanLibrary(); }},
       {label:"Open data folder", run:function(){ var i=inv(); if(i) i("open_data_dir"); }},
+      {label:"Export library (JSON)", run:function(){ exportLibrary("json"); }},
+      {label:"Export library (Markdown)", run:function(){ exportLibrary("markdown"); }},
       {sep:true},
       {label:"Quit", run:quitApp}
     ],
