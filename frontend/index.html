@@ -146,8 +146,8 @@
   .card-h{display:flex; align-items:center; gap:8px; padding:7px 9px; cursor:pointer;}
   .card-h .caret{font-family:var(--mono); width:12px; color:var(--dgray);}
   .card-h .nm{font-weight:bold;}
-  .card-h .ver{font-family:var(--mono); font-size:15px; color:var(--green);}
-  .card-h .age{flex:1; color:var(--dgray); font-size:11px;}
+  .card-h .ver{font-family:var(--mono); font-size:15px; font-weight:bold; color:var(--green);}
+  .card-h .age{flex:1; color:var(--ddgray); font-size:12px;}
   .rec{font-size:11px; font-weight:bold; padding:2px 8px; border-radius:2px;}
   .rec.safe{background:#d6f0d6; color:var(--green);}
   .rec.hold{background:#f6e7c2; color:var(--amber);}
@@ -159,9 +159,10 @@
   .signal.warn{border-color:var(--amber);} .signal.danger{border-color:var(--red);} .signal.good{border-color:var(--green);}
   .signal .lbl{font-weight:bold;}
   .rec.malicious{background:#a00; color:#fff;}
-  .wire{border:1px solid var(--dgray); background:#1a1a1a; color:#cfc; font-family:var(--mono); font-size:11px; margin-bottom:8px;}
+  .wire{border:1px solid var(--dgray); background:#1a1a1a; color:#d6ffd6; font-family:var(--mono); font-size:13px; margin-bottom:8px;}
   .wire-h{background:#000; color:#9f9; padding:2px 6px; font-weight:bold;}
-  .wire-item{padding:3px 6px; border-top:1px solid #333;}
+  .wire-item{padding:4px 6px; border-top:1px solid #333; line-height:1.3;}
+  .wire-date{color:#7fb37f; margin-left:4px;}
 
   .statusbar{display:flex; align-items:center; padding:3px 0 0; flex:0 0 auto;}
   .sb{padding:3px 7px; margin-right:3px; box-shadow:inset -1px -1px var(--white), inset 1px 1px var(--dgray);}
@@ -465,7 +466,7 @@
     if(WIRE.length){
       var items=WIRE.slice(0,8).map(function(w){
         return '<div class="wire-item"><span class="src '+esc(w.eco)+'">'+esc(w.eco)+'</span> '+
-          esc(w.summary||w.id)+(w.packages&&w.packages.length?' <span class="muted">('+esc(w.packages.slice(0,4).join(", "))+(w.packages.length>4?", \u2026":"")+')</span>':'')+'</div>';
+          esc(w.summary||w.id)+(w.published?'<span class="wire-date">'+esc(w.published.slice(0,10))+'</span>':'')+'</div>';
       }).join("");
       f.innerHTML+='<div class="wire"><div class="wire-h">\ud83d\udce1 supply-chain wire</div>'+items+'</div>';
     } else if(!WIRE_OK){
