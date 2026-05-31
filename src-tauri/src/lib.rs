@@ -4,6 +4,7 @@ mod store;
 mod ops;
 mod intel;
 mod search;
+mod pathenv;
 
 use scan::InstalledTool;
 use store::{HistoryEntry, Store};
