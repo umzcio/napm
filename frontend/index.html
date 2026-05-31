@@ -386,7 +386,7 @@
         '<td class="user'+(t.publisher?'':' muted')+'">@'+esc(t.publisher||"unknown")+'</td>'+
         '<td class="muted">'+esc(t.size)+'</td>'+
         '<td class="muted">'+ago(t.updated)+'</td>'+
-        '<td><span class="pin '+(t.pinned?'on':'')+'" data-pin="'+i+'" title="freeze version, skip Update All">📌</span></td>'+
+        '<td>'+(manual?'<span class="muted">—</span>':'<span class="pin '+(t.pinned?'on':'')+'" data-pin="'+i+'" title="freeze version, skip Update All">📌</span>')+'</td>'+
         '<td>'+action+'</td>';
       tr.addEventListener("click",function(){selected=i; renderRows();});
       rowsEl.appendChild(tr);
@@ -394,7 +394,7 @@
     renderStatus();
   }
   function renderStatus(){
-    var installed=TOOLS.filter(function(t){return t.installed;}).length;
+    var installed=TOOLS.filter(function(t){return t.installed || t.eco==="manual";}).length;
     var outdated=TOOLS.filter(function(t){return statusOf(t)==="update";}).length;
     var pinned=TOOLS.filter(function(t){return t.pinned;}).length;
     var safe=safeCount();
@@ -504,7 +504,7 @@
     if(LOADING_FEED) return;
     LOADING_FEED=true;
     document.getElementById("feed").innerHTML='<div class="searching">Checking the swarm for advisories…</div>';
-    var installed=TOOLS.filter(function(t){return t.installed;}).map(function(t){
+    var installed=TOOLS.filter(function(t){return t.installed && t.eco!=="manual";}).map(function(t){
       return {pkg:t.pkg, eco:t.eco, installed:t.installed, latest:t.latest};
     });
     inv("get_whats_new",{installed:installed, verdictScope:verdictScope()}).then(function(r){
