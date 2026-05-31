@@ -131,6 +131,38 @@ the pip search gap):
 Scope: list the tool and a best-effort version, mark the source clearly as
 "manual / unmanaged," and be honest that updates are mostly out of napm's hands.
 
+## M9 - Right-click context menus (throughout)
+
+Right-click anywhere meaningful and get a Win98-style beveled context menu of
+the actions that apply to whatever was clicked. This is deeply period-accurate
+(the old file-sharing clients leaned on right-click menus) and it is the fastest
+path to actions that are currently buried in row buttons or not exposed at all.
+Pairs with M6: reuse the same beveled menu chrome the menu bar uses.
+
+Every item must do something real. Disabled items are allowed only when honestly
+unavailable (e.g. brew rollback), shown greyed with a reason, never as filler.
+
+Per surface, the menu is context-aware:
+
+- **Library row:** Get / Update or Install (mirrors the row button); Roll back to
+  a previous version (gated for brew, as today); Pin / Unpin; Copy package name;
+  Copy the exact install command; Open homepage / repo (from the publisher
+  metadata already scanned); jump to this tool's What's New card (once M5 lands).
+- **Search result:** Get / Install; Copy package name; Copy install command; Open
+  the registry page (npmjs.org / formulae.brew.sh / pypi.org); filter the swarm
+  to this source.
+- **Transfers row:** Copy the streamed log output; Re-run; Roll back to this
+  version; Copy the from -> to.
+- **History entry:** Roll back to this version; Copy the entry; jump to the tool
+  in the library.
+
+Build notes: one reusable context-menu component (positioned at the cursor,
+dismiss on outside-click / Escape, stays inside the window bounds), fed a
+per-surface action list. Actions route through the existing commands (install via
+the M3 Transfers path, pins via `set_pin`, etc.); "Open ..." links need a real
+URL, so surface the homepage/repo from the scanned metadata rather than guessing.
+No shell logic in the frontend.
+
 ## Deferred on purpose
 
 - `hold` issue-velocity scoring (needs GitHub issue-rate data + judgment) - v1.5.
