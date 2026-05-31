@@ -31,10 +31,28 @@ fn get_history(app: tauri::AppHandle) -> Vec<HistoryEntry> {
     open_store(&app).history()
 }
 
+#[tauri::command]
+fn run_op(
+    app: tauri::AppHandle,
+    op_id: String,
+    eco: String,
+    pkg: String,
+    from: Option<String>,
+    to: String,
+    action: String,
+) {
+    let store = open_store(&app);
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    ops::run_op(app.clone(), store, op_id, eco, pkg, from, to, action, ts);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
-    .invoke_handler(tauri::generate_handler![scan_installed, set_pin, get_history])
+    .invoke_handler(tauri::generate_handler![scan_installed, set_pin, get_history, run_op])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(

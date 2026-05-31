@@ -30,6 +30,109 @@ pub fn build_command(
     }
 }
 
+use serde::Serialize;
+use std::io::{BufRead, BufReader};
+use std::process::{Command, Stdio};
+use tauri::{AppHandle, Emitter};
+
+use crate::store::{HistoryEntry, Store};
+
+#[derive(Clone, Serialize)]
+struct LineEvent {
+    op_id: String,
+    stream: String, // "stdout" | "stderr"
+    line: String,
+}
+
+#[derive(Clone, Serialize)]
+struct DoneEvent {
+    op_id: String,
+    success: bool,
+    code: i32,
+}
+
+/// Spawn the operation on a background thread, streaming `transfer-line` events
+/// and a final `transfer-done`. On success, log a HistoryEntry to `store`.
+/// Returns immediately. `ts` is the current Unix time (the caller stamps it).
+#[allow(clippy::too_many_arguments)]
+pub fn run_op(
+    app: AppHandle,
+    store: Store,
+    op_id: String,
+    eco: String,
+    pkg: String,
+    from: Option<String>,
+    to: String,
+    action: String,
+    ts: i64,
+) {
+    let pip = crate::scan::pip::pip_bin().unwrap_or("pip3");
+    let built = build_command(&eco, &pkg, &to, &action, pip);
+
+    std::thread::spawn(move || {
+        let (prog, args) = match built {
+            Some(c) => c,
+            None => {
+                let _ = app.emit(
+                    "transfer-done",
+                    DoneEvent { op_id: op_id.clone(), success: false, code: -1 },
+                );
+                return;
+            }
+        };
+
+        let mut child = match Command::new(&prog)
+            .args(&args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = app.emit(
+                    "transfer-line",
+                    LineEvent { op_id: op_id.clone(), stream: "stderr".into(), line: format!("failed to start {}: {}", prog, e) },
+                );
+                let _ = app.emit("transfer-done", DoneEvent { op_id: op_id.clone(), success: false, code: -1 });
+                return;
+            }
+        };
+
+        let mut handles = Vec::new();
+        if let Some(pipe) = child.stdout.take() {
+            let app2 = app.clone();
+            let id2 = op_id.clone();
+            handles.push(std::thread::spawn(move || {
+                for line in BufReader::new(pipe).lines().map_while(Result::ok) {
+                    let _ = app2.emit("transfer-line", LineEvent { op_id: id2.clone(), stream: "stdout".into(), line });
+                }
+            }));
+        }
+        if let Some(pipe) = child.stderr.take() {
+            let app2 = app.clone();
+            let id2 = op_id.clone();
+            handles.push(std::thread::spawn(move || {
+                for line in BufReader::new(pipe).lines().map_while(Result::ok) {
+                    let _ = app2.emit("transfer-line", LineEvent { op_id: id2.clone(), stream: "stderr".into(), line });
+                }
+            }));
+        }
+
+        let status = child.wait();
+        for h in handles {
+            let _ = h.join();
+        }
+
+        let code = status.as_ref().map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
+        let success = status.map(|s| s.success()).unwrap_or(false);
+
+        if success {
+            store.add_history(HistoryEntry { ts, pkg, eco, action, from, to });
+        }
+        let _ = app.emit("transfer-done", DoneEvent { op_id, success, code });
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

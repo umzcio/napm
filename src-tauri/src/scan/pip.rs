@@ -72,7 +72,7 @@ pub fn parse_pip(list_json: &str, outdated_json: &str) -> Vec<InstalledTool> {
 }
 
 /// Find a working pip binary. This machine has `pip3` but no `pip`.
-fn pip_bin() -> Option<&'static str> {
+pub(crate) fn pip_bin() -> Option<&'static str> {
     for c in ["pip3", "pip"] {
         let ok = Command::new(c)
             .arg("--version")
