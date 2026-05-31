@@ -812,14 +812,18 @@
       {label:"Repo on GitHub", run:function(){ var i=inv(); if(i) i("open_external",{url:"https://github.com/umzcio/napm"}); }}
     ]
   };
-  var openMenuName=null;
-  function closeMenu(){
-    openMenuName=null;
+  var openMenuName=null, popupOpen=false, currentItems=null;
+  function closePopup(){
+    popupOpen=false; openMenuName=null; currentItems=null;
     document.getElementById("menuPop").style.display="none";
     document.querySelectorAll("#menubar span").forEach(function(s){ s.classList.remove("open"); });
   }
-  function renderMenu(name, anchor){
-    var items=MENUS[name]; if(!items) return;
+  // Open a popup menu of `items` at viewport coords (x,y). Items may include
+  // falsy entries (omitted) so callers can conditionally include an item.
+  function openPopup(items, x, y){
+    items=items.filter(Boolean);
+    currentItems=items; openMenuName=null;
+    document.querySelectorAll("#menubar span").forEach(function(s){ s.classList.remove("open"); });
     var pop=document.getElementById("menuPop");
     pop.innerHTML=items.map(function(it,idx){
       if(it.sep) return '<div class="sep"></div>';
@@ -827,15 +831,21 @@
       var mark = it.checked&&it.checked() ? "✓" : it.dot&&it.dot() ? "•" : "";
       return '<div class="mi'+(dis?" disabled":"")+'" data-idx="'+idx+'"><span class="mark">'+mark+'</span>'+esc(it.label)+'</div>';
     }).join("");
+    pop.style.left=x+"px"; pop.style.top=y+"px"; pop.style.display="block";
+    var maxLeft=window.innerWidth-pop.offsetWidth-4; if(x>maxLeft) pop.style.left=Math.max(2,maxLeft)+"px";
+    var maxTop=window.innerHeight-pop.offsetHeight-4; if(y>maxTop) pop.style.top=Math.max(2,maxTop)+"px";
+    popupOpen=true;
+  }
+  function renderMenu(name, anchor){
+    var items=MENUS[name]; if(!items) return;
     var r=anchor.getBoundingClientRect();
-    pop.style.left=r.left+"px"; pop.style.top=r.bottom+"px"; pop.style.display="block";
-    var maxLeft=window.innerWidth-pop.offsetWidth-4; if(r.left>maxLeft) pop.style.left=Math.max(2,maxLeft)+"px";
+    openPopup(items, r.left, r.bottom);
     openMenuName=name;
     document.querySelectorAll("#menubar span").forEach(function(s){ s.classList.toggle("open", s.dataset.menu===name); });
   }
   document.getElementById("menubar").addEventListener("click",function(e){
     var s=e.target.closest("[data-menu]"); if(!s) return;
-    if(openMenuName===s.dataset.menu) closeMenu(); else renderMenu(s.dataset.menu, s);
+    if(openMenuName===s.dataset.menu) closePopup(); else renderMenu(s.dataset.menu, s);
   });
   document.getElementById("menubar").addEventListener("mouseover",function(e){
     var s=e.target.closest("[data-menu]"); if(!s||openMenuName==null||openMenuName===s.dataset.menu) return;
@@ -843,8 +853,8 @@
   });
   document.getElementById("menuPop").addEventListener("click",function(e){
     var mi=e.target.closest(".mi"); if(!mi||mi.classList.contains("disabled")) return;
-    var it=MENUS[openMenuName][+mi.dataset.idx];
-    closeMenu();
+    var it=currentItems&&currentItems[+mi.dataset.idx];
+    closePopup();
     if(it && it.run) it.run();
   });
   // Dismiss on any press outside the menu. mousedown in the capture phase is more
@@ -852,9 +862,9 @@
   // rebuild the row they were clicked on) and is not swallowed by the titlebar
   // drag region the way a plain click is.
   document.addEventListener("mousedown",function(e){
-    if(openMenuName!=null && !e.target.closest("#menubar") && !e.target.closest("#menuPop")) closeMenu();
+    if(popupOpen && !e.target.closest("#menubar") && !e.target.closest("#menuPop")) closePopup();
   }, true);
-  document.addEventListener("keydown",function(e){ if(e.key==="Escape"){ if(openMenuName!=null) closeMenu(); else closeModal(); } });
+  document.addEventListener("keydown",function(e){ if(e.key==="Escape"){ if(popupOpen) closePopup(); else closeModal(); } });
 
   function closeModal(){ document.getElementById("modalBack").style.display="none"; }
   function renderPrefs(s){
