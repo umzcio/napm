@@ -2,6 +2,7 @@ mod http;
 mod scan;
 mod store;
 mod ops;
+mod intel;
 mod search;
 
 use scan::InstalledTool;
