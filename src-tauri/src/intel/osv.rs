@@ -78,6 +78,13 @@ pub fn scan_security(installed: &[ToolRef]) -> Option<Vec<SecurityAlert>> {
     let batch_resp = crate::http::post_json("https://api.osv.dev/v1/querybatch", &body).ok()?;
     let id_lists = parse_osv_batch(&batch_resp);
 
+    // A truncated or malformed response (fewer results than queries) would leave
+    // tail packages unscanned while still looking successful. Treat any length
+    // mismatch as a failed check (None) so it can never be misread as "clean".
+    if id_lists.len() != eligible.len() {
+        return None;
+    }
+
     // Collect (tool, first_id) pairs for those with advisories.
     let flagged: Vec<(&ToolRef, String)> = eligible.iter().enumerate().filter_map(|(i, (t, _eco))| {
         let ids = id_lists.get(i)?;
