@@ -82,10 +82,13 @@
   .muted{color:var(--dgray);}
   .glyph{font-family:var(--mono); font-size:16px; width:18px; text-align:center;}
   .g-up{color:var(--amber);} .g-ok{color:var(--green);} .g-off{color:var(--dgray);}
-  tr.sel .g-up,tr.sel .g-ok,tr.sel .g-off{color:#fff;}
+  .g-safe{color:var(--green);} .g-hold{color:var(--amber);}
+  tr.sel .g-up,tr.sel .g-ok,tr.sel .g-off,tr.sel .g-safe,tr.sel .g-hold{color:#fff;}
   .user{font-family:var(--mono); font-size:15px;}
   .vernew{font-weight:bold; color:var(--green);}
+  .verhold{font-weight:bold; color:var(--amber);}
   tr.sel .vernew{color:#9cff9c;}
+  tr.sel .verhold{color:#ffd98a;}
   .rowbtn{font-size:11px; padding:1px 7px; height:18px; min-width:0; margin-left:3px;}
   .pin{cursor:pointer; font-size:13px; filter:grayscale(1) opacity(.4); user-select:none;}
   .pin.on{filter:none;}
@@ -222,8 +225,8 @@
     <div class="sb"><span class="dot">●</span> Connected</div>
     <div class="sb" id="sbInstalled">0 installed</div>
     <div class="sb grow" id="sbState">tracking 0 packages</div>
-    <div class="sb slider" title="purely decorative, like it always was">
-      ⇅ <input type="range" min="0" max="100" value="56"> 56k
+    <div class="sb slider" title="Update appetite: how big a version jump counts as safe to take">
+      ⇅ <input type="range" id="appetite" min="0" max="2" step="1" value="1"> <span id="appetiteLabel" style="display:inline-block; min-width:88px;">up to minor</span>
     </div>
   </div>
 
@@ -287,23 +290,38 @@
   var rowsEl=document.getElementById("rows");
   var GLYPH={update:["↑","g-up"],current:["✓","g-ok"],offline:["✗","g-off"]};
 
+  // ---- UPDATE APPETITE (the throttle dial) -------------------------------
+  // 0 = patch only, 1 = up to minor, 2 = bleeding edge. Persisted in localStorage.
+  var APPETITE = 1;
+  var APP_LABELS = ["patch only","up to minor","bleeding edge"];
+  function verParts(v){ var p=String(v||"").split(".").slice(0,3).map(function(x){ var m=/^\d+/.exec(x); return m?parseInt(m[0],10):0; }); while(p.length<3) p.push(0); return p; }
+  function bumpKind(a,b){ if(!a||!b||a===b) return "none"; var x=verParts(a),y=verParts(b);
+    if(y[0]!==x[0]) return "major"; if(y[1]!==x[1]) return "minor"; return "patch"; }
+  function isSafe(kind){ if(kind==="none") return false; if(APPETITE>=2) return true; if(APPETITE>=1) return kind!=="major"; return kind==="patch"; }
+  function safeCount(){ return TOOLS.filter(function(t){ return statusOf(t)==="update" && t.eco!=="npx" && !t.pinned && isSafe(bumpKind(t.installed,t.latest)); }).length; }
+
   // ---- LIBRARY -----------------------------------------------------------
   function renderRows(){
     rowsEl.innerHTML="";
     TOOLS.forEach(function(t,i){
       var npx = t.eco==="npx";
-      var st=statusOf(t), g=npx?["♪","g-off"]:GLYPH[st], off=st==="offline";
+      var st=statusOf(t), off=st==="offline";
+      var kind = (st==="update"&&!npx) ? bumpKind(t.installed,t.latest) : "none";
+      var safe = st==="update" && !npx && isSafe(kind);
+      var held = st==="update" && !npx && !safe;
+      var g = npx?["♪","g-off"] : st==="update" ? (safe?["↑","g-safe"]:["↑","g-hold"]) : GLYPH[st];
+      var gTitle = (st==="update"&&!npx) ? kind+" update"+(held?" — above your appetite":"") : "";
       var tr=document.createElement("tr"); tr.dataset.i=i;
       if(selected===i) tr.className="sel";
       var action = npx ? '<span class="muted">—</span>'
                  : st==="update" ? '<button class="btn rowbtn" data-get="'+i+'">Get</button>'
                  : off ? '<button class="btn rowbtn" data-get="'+i+'">Install</button>' : '<span class="muted">—</span>';
       tr.innerHTML=
-        '<td class="glyph '+g[1]+'">'+g[0]+'</td>'+
+        '<td class="glyph '+g[1]+'"'+(gTitle?' title="'+gTitle+'"':'')+'>'+g[0]+'</td>'+
         '<td>'+(t.pinned?'📌 ':'')+esc(t.name)+' <span class="src '+t.eco+'">'+t.eco+'</span>'+
           (t.description?'<span class="toold">'+esc(t.description)+'</span>':'')+'</td>'+
         '<td class="'+(off?'muted':'')+'">'+(t.installed||"—")+'</td>'+
-        '<td class="'+(st==="update"&&!npx?'vernew':'muted')+'">'+(npx?"—":t.latest)+'</td>'+
+        '<td class="'+(npx?'muted':safe?'vernew':held?'verhold':'muted')+'">'+(npx?"—":t.latest)+'</td>'+
         '<td class="user'+(t.publisher?'':' muted')+'">@'+(t.publisher||"unknown")+'</td>'+
         '<td class="muted">'+t.size+'</td>'+
         '<td class="muted">'+ago(t.updated)+'</td>'+
@@ -318,9 +336,10 @@
     var installed=TOOLS.filter(function(t){return t.installed;}).length;
     var outdated=TOOLS.filter(function(t){return statusOf(t)==="update";}).length;
     var pinned=TOOLS.filter(function(t){return t.pinned;}).length;
+    var safe=safeCount();
     document.getElementById("sbInstalled").textContent=installed+" installed";
-    document.getElementById("sbState").textContent="tracking "+TOOLS.length+" packages \u00b7 "+outdated+" outdated"+(pinned?(" \u00b7 "+pinned+" pinned"):"");
-    document.getElementById("updateAll").disabled=TOOLS.filter(function(t){return statusOf(t)==="update"&&!t.pinned;}).length===0;
+    document.getElementById("sbState").textContent="tracking "+TOOLS.length+" packages \u00b7 "+outdated+" outdated \u00b7 "+safe+" safe to take"+(pinned?(" \u00b7 "+pinned+" pinned"):"");
+    document.getElementById("updateAll").disabled=safe===0;
     var nb=document.getElementById("newBadge"); nb.textContent=FEED.length; nb.style.display=FEED.length?"":"none";
   }
 
@@ -454,7 +473,7 @@
   document.getElementById("searchBtn").addEventListener("click",function(){ runSearch(document.getElementById("search").value.trim()); });
   document.getElementById("search").addEventListener("keydown",function(e){ if(e.key==="Enter") runSearch(this.value.trim()); });
   document.getElementById("updateAll").addEventListener("click",function(){
-    TOOLS.forEach(function(t,i){ if(statusOf(t)==="update"&&!t.pinned) queueTransfer(i,t.latest,"update"); }); switchTab("transfers");
+    TOOLS.forEach(function(t,i){ if(statusOf(t)==="update"&&t.eco!=="npx"&&!t.pinned&&isSafe(bumpKind(t.installed,t.latest))) queueTransfer(i,t.latest,"update"); }); switchTab("transfers");
   });
   rowsEl.addEventListener("click",function(e){
     var p=e.target.closest("[data-pin]");
@@ -498,6 +517,18 @@
       renderRows(); renderFeed(); renderStatus();
     }).catch(function(e){ console.error("scan_installed failed", e); renderRows(); renderFeed(); renderStatus(); });
   }
+  // Update appetite dial: load saved level, label it, re-classify live on drag.
+  (function(){
+    var s=document.getElementById("appetite"), lab=document.getElementById("appetiteLabel");
+    var saved=parseInt(localStorage.getItem("napm.appetite"),10);
+    if(saved>=0&&saved<=2){ APPETITE=saved; s.value=String(saved); }
+    lab.textContent=APP_LABELS[APPETITE];
+    s.addEventListener("input",function(){
+      APPETITE=parseInt(s.value,10)||0; lab.textContent=APP_LABELS[APPETITE];
+      try{ localStorage.setItem("napm.appetite",APPETITE); }catch(e){}
+      renderRows();
+    });
+  })();
   renderXfers(); renderHistory(); runSearch(""); nextStep(); scanLibrary();
 })();
 </script>
