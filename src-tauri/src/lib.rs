@@ -50,10 +50,20 @@ fn run_op(
     ops::run_op(app.clone(), store, op_id, eco, pkg, from, to, action, ts);
 }
 
+#[tauri::command]
+fn search_registry(app: tauri::AppHandle, query: String) -> Vec<search::SearchResult> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let _ = std::fs::create_dir_all(&dir);
+    search::search_all(&query, &dir)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
-    .invoke_handler(tauri::generate_handler![scan_installed, set_pin, get_history, run_op])
+    .invoke_handler(tauri::generate_handler![scan_installed, set_pin, get_history, run_op, search_registry])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(

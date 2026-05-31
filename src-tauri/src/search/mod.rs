@@ -37,6 +37,19 @@ pub fn merge(sources: Vec<Vec<SearchResult>>) -> Vec<SearchResult> {
     out
 }
 
+/// Federated swarm search: npm + brew + pip, merged and sorted. Each source
+/// fails independently to an empty list, so one dead registry never blanks the
+/// grid. `cache_dir` holds the brew catalog/analytics caches.
+pub fn search_all(query: &str, cache_dir: &Path) -> Vec<SearchResult> {
+    let query = query.trim();
+    if query.is_empty() { return Vec::new(); }
+    merge(vec![
+        npm::search_npm(query),
+        brew::search_brew(query, cache_dir),
+        pip::search_pip(query),
+    ])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
