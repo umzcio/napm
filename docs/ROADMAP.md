@@ -228,20 +228,52 @@ scan rows carry package/distribution names, not binary basenames; fixed by addin
 the `npm root -g` and pip user-script path roots), and an over-broad first cut
 that wrongly excluded all of `/usr/local/bin`.
 
-## M10 - Packaging
+## M10 - Packaging (split into M10a + M10b)
 
-A real signed/bundled macOS `.app` for daily use.
+Packaging grew past one milestone once installer and auto-updater were added, so
+it is split. M10a delivers a real working local app (the riskiest napm-specific
+piece, PATH, first); M10b makes it distributable and self-updating.
 
-- Fix the bundle identifier (currently `com.tauri.dev` -> `com.napm.app`).
-- Resolve the npm/brew PATH for Finder-launched apps (dev inherits the terminal
-  PATH; a bundled app may not).
-- Set the real shipping version in `tauri.conf.json` / `Cargo.toml`. The titlebar
-  wordmark now reads it live (`napm v<version>`), so packaging is the single place
-  that version is set and it flows everywhere.
-- The npstr logo icon (`icons/icon.icns`, already generated and configured) only
-  embeds in a packaged `.app`. In `tauri dev` the unbundled binary has no icon, so
-  the Dock, Finder, and the About panel show a generic placeholder. Verify the
-  packaged build shows the npstr logo in all three.
+### M10a - Real app bundle + PATH
+
+A real macOS `.app` you run from `/Applications` that actually finds your tools.
+
+- Fix the bundle identifier (`com.tauri.dev` -> `com.napm.app`). Note this moves
+  the app-data dir (`~/Library/Application Support/<identifier>/`), so decide
+  whether to migrate existing pins/history/settings or start fresh.
+- **PATH resolution (the napm-specific crux).** A Finder/Dock-launched app does
+  not inherit the shell PATH (it gets a bare `/usr/bin:/bin:/usr/sbin:/sbin`), so
+  a bundled napm would not find `npm`/`brew`/`pip3` or any manual tool. Fix:
+  capture the real login-shell PATH at startup (`$SHELL -lic 'echo $PATH'`) and
+  set it on napm's process before anything spawns. This also fixes the M9 manual
+  scanner for free, since it walks `$PATH`. Handle shell quirks robustly.
+- Set the real version in `tauri.conf.json` / `Cargo.toml` (single source; the
+  titlebar reads it live) and fill author/repo metadata in `Cargo.toml`.
+- Verify the npstr icon (`icons/icon.icns`, already configured) embeds in the
+  packaged `.app` and shows in the Dock, Finder, and the About panel (it does not
+  appear in `tauri dev` because that runs the unbundled binary).
+
+### M10b - Distributable & self-updating
+
+A notarized `.dmg` that opens cleanly anywhere, plus in-app updates, published
+on a now-public GitHub repo. Reuses the signing/notarization setup proven in
+zMeet/zMD/fiddle: `Developer ID Application: The University of Montana
+(5JJ6G6A84S)` (already in the keychain) and an App Store Connect API key
+(`.p8` + key-id + issuer) in a gitignored `scripts/.notary-config.local`.
+
+- **Sign + notarize.** Tauri signs the `.app` with the Developer ID identity
+  (hardened runtime + entitlements) during build; then `xcrun notarytool submit
+  --wait` + `xcrun stapler staple` the `.dmg`, mirroring zMeet's `notarize.sh`.
+- **Installer.** A styled drag-to-Applications `.dmg` (Tauri dmg target).
+- **Auto-updater.** Tauri updater plugin: a minisign signing keypair (pubkey
+  baked into the app, privkey kept secret), a hosted `latest.json` + signed
+  bundle on GitHub Releases. UX: check on launch and notify (unobtrusive prompt),
+  plus a manual "Check for updates" in the Help menu. Never silent auto-install.
+- **Build pipeline.** Local make/shell scripts on the Mac (build -> sign ->
+  notarize -> staple -> dmg + updater artifacts). GitHub Actions CI deferred.
+- **Go public.** Flip `github.com/umzcio/napm` public: verify no secrets in
+  history, the notary config and updater privkey are gitignored, LICENSE/README
+  in order, and a tagged release flow.
 
 ## M11 - AI tooling ecosystem (skills + MCP connectors)
 
