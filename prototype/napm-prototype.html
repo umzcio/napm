@@ -452,10 +452,10 @@
     openPopup([
       {label:"Get / Install", run:function(){ installPackage(p.pkg); }},
       {label:"Copy package name", run:function(){ copyText(p.pkg); }},
-      {label:"Copy install command", run:function(){ copyText(installCmd(p.eco,p.pkg,p.version)); }},
+      {label:"Copy install command", run:function(){ copyText(installCmd(p.eco,p.pkg,p.version||undefined)); }},
       ru?{label:"Open "+p.eco+" page", run:function(){ openExt(ru); }}:null,
       {sep:true},
-      {label:"Filter swarm to "+p.eco, run:function(){
+      {label:"Filter swarm to "+p.eco, disabled:function(){ return searchSource===p.eco; }, run:function(){
         searchSource=p.eco;
         document.querySelectorAll("#srcChips .chip").forEach(function(c){ c.classList.toggle("on", c.dataset.src===p.eco); });
         renderSearchResults();
@@ -694,12 +694,13 @@
     var canRoll = h.action!=="rollback" && h.from && h.eco!=="brew";
     var ti=findTool(h.pkg);
     openPopup([
-      {label: canRoll?("Roll back to "+h.from):"Roll back", disabled:function(){ return !canRoll || ti<0; },
-        run:function(){ if(canRoll && ti>=0){ queueTransfer(ti, h.from, "rollback"); switchTab("transfers"); } }},
+      {label: !canRoll?"Roll back":ti<0?("Roll back to "+h.from+" (tool not in library)"):("Roll back to "+h.from),
+        disabled:function(){ return !canRoll || ti<0; },
+        run:function(){ var c=findTool(h.pkg); if(canRoll && c>=0){ queueTransfer(c, h.from, "rollback"); switchTab("transfers"); } }},
       {label:"Copy entry", run:function(){ copyText(h.pkg+" "+h.action+" "+(h.from||"-")+" -> "+h.to); }},
       {sep:true},
-      {label:"Jump to tool in library", disabled:function(){ return ti<0; },
-        run:function(){ if(ti>=0){ selected=ti; switchTab("library"); renderRows(); } }}
+      {label: ti<0?"Tool not in library":"Jump to tool in library", disabled:function(){ return ti<0; },
+        run:function(){ var c=findTool(h.pkg); if(c>=0){ selected=c; switchTab("library"); renderRows(); } }}
     ], x, y);
   }
   histWrap.addEventListener("contextmenu",function(e){
@@ -730,7 +731,9 @@
         run:function(){ copyText(t.lines.map(function(l){return l.line;}).join("\n")); }},
       {label:"Copy command", run:function(){ copyText(t.cmd); }},
       {sep:true},
-      {label:"Re-run", run:function(){ var i=findTool(t.pkg); if(i>=0) queueTransfer(i, t.to, t.action); }}
+      {label:"Re-run",
+        disabled:function(){ if(!t.done) return true; var i=findTool(t.pkg); if(i<0) return true; return t.action==="rollback"&&TOOLS[i].eco==="brew"; },
+        run:function(){ var i=findTool(t.pkg); if(i>=0) queueTransfer(i, t.to, t.action); }}
     ], x, y);
   }
   xferListEl.addEventListener("contextmenu",function(e){
@@ -753,22 +756,31 @@
   });
   function libMenu(i, x, y){
     var t=TOOLS[i]; if(!t) return;
-    var st=statusOf(t);
-    var prev=t.eco!=="brew"?priorVersion(t.pkg,t.eco):null;
+    var st=statusOf(t), npx=t.eco==="npx", brew=t.eco==="brew";
+    var prev=!brew?priorVersion(t.pkg,t.eco):null;
     var ru=registryUrl(t.eco,t.pkg);
+    var feedIdx=function(){ for(var k=0;k<FEED.length;k++) if(FEED[k].pkg===t.pkg) return k; return -1; };
     openPopup([
-      st==="update" ? {label:"Update to "+t.latest, run:function(){ queueTransfer(i,t.latest,"update"); switchTab("transfers"); }}
-        : !t.installed ? {label:"Install", run:function(){ queueTransfer(i,t.latest,"install"); switchTab("transfers"); }}
-        : {label:"Up to date", disabled:function(){return true;}},
-      {label: prev?("Roll back to "+prev):"Roll back", disabled:function(){ return !prev; },
+      st==="update"&&!npx ? {label:"Update to "+t.latest, run:function(){ queueTransfer(i,t.latest,"update"); switchTab("transfers"); }}
+        : !t.installed&&!npx ? {label:"Install", run:function(){ queueTransfer(i,t.latest,"install"); switchTab("transfers"); }}
+        : {label: npx?"npx tool (cached)":"Up to date", disabled:function(){return true;}},
+      {label: brew?"Roll back (brew: not supported)":prev?("Roll back to "+prev):"Roll back",
+        disabled:function(){ return brew || !prev; },
         run:function(){ if(prev){ queueTransfer(i,prev,"rollback"); switchTab("transfers"); } }},
       {sep:true},
       {label: t.pinned?"Unpin":"Pin", run:function(){ togglePin(i); }},
       {label:"Copy package name", run:function(){ copyText(t.pkg); }},
-      {label:"Copy install command", run:function(){ copyText(installCmd(t.eco,t.pkg,t.installed||t.latest)); }},
+      {label:"Copy install command", disabled:function(){ return !t.installed && !t.latest; },
+        run:function(){ copyText(installCmd(t.eco,t.pkg,t.installed||t.latest||undefined)); }},
       ru?{label:"Open "+t.eco+" page", run:function(){ openExt(ru); }}:null,
       {sep:true},
-      {label:"What's New for this", run:function(){ if(!FEED_LOADED) loadWhatsNew(); switchTab("whatsnew"); }}
+      {label: FEED_LOADED?"What's New for this":"Load What's New...",
+        disabled:function(){ return FEED_LOADED && feedIdx()<0; },
+        run:function(){
+          if(!FEED_LOADED){ loadWhatsNew(); switchTab("whatsnew"); return; }
+          switchTab("whatsnew");
+          var idx=feedIdx(); if(idx>=0){ var cards=document.querySelectorAll("#feed .card"); if(cards[idx]) cards[idx].scrollIntoView({block:"start"}); }
+        }}
     ], x, y);
   }
   rowsEl.addEventListener("contextmenu",function(e){
