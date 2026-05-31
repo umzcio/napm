@@ -1,3 +1,4 @@
+mod http;
 mod scan;
 mod store;
 mod ops;

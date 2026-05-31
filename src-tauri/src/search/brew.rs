@@ -98,7 +98,7 @@ fn cached_or_fetch(path: &Path, url: &str) -> Option<String> {
     }
 
     // Stale or missing: attempt a fresh fetch.
-    match super::http::get(url) {
+    match crate::http::get(url) {
         Ok(body) => {
             // Best-effort write; if it fails the caller still gets the body.
             let _ = std::fs::write(path, &body);

@@ -55,9 +55,9 @@ pub fn parse_downloads(json: &str) -> BTreeMap<String, u64> {
 pub fn search_npm(query: &str) -> Vec<SearchResult> {
     let url = format!(
         "https://registry.npmjs.org/-/v1/search?text={}&size=25",
-        super::http::encode(query)
+        crate::http::encode(query)
     );
-    let body = match super::http::get(&url) {
+    let body = match crate::http::get(&url) {
         Ok(b) => b,
         Err(_) => return Vec::new(),
     };
@@ -85,7 +85,7 @@ pub fn search_npm(query: &str) -> Vec<SearchResult> {
             "https://api.npmjs.org/downloads/point/last-week/{}",
             joined
         );
-        if let Ok(dl_body) = super::http::get(&dl_url) {
+        if let Ok(dl_body) = crate::http::get(&dl_url) {
             for (k, v) in parse_downloads(&dl_body) {
                 dl_map.insert(k, v);
             }
@@ -100,9 +100,9 @@ pub fn search_npm(query: &str) -> Vec<SearchResult> {
                 s.spawn(move || {
                     let dl_url = format!(
                         "https://api.npmjs.org/downloads/point/last-week/{}",
-                        super::http::encode(pkg)
+                        crate::http::encode(pkg)
                     );
-                    match super::http::get(&dl_url) {
+                    match crate::http::get(&dl_url) {
                         Ok(dl_body) => parse_downloads(&dl_body),
                         Err(_) => BTreeMap::new(),
                     }

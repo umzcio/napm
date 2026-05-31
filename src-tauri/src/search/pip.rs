@@ -27,7 +27,7 @@ pub fn parse_pip_downloads(json: &str) -> u64 {
 /// Returns a single result if the name resolves, empty if not found.
 /// The pip source label in the UI explains the exact-match limitation.
 pub fn search_pip(query: &str) -> Vec<SearchResult> {
-    let body = match super::http::get(&format!("https://pypi.org/pypi/{}/json", super::http::encode(query))) {
+    let body = match crate::http::get(&format!("https://pypi.org/pypi/{}/json", crate::http::encode(query))) {
         Ok(b) => b,
         Err(_) => return Vec::new(),
     };
@@ -38,9 +38,9 @@ pub fn search_pip(query: &str) -> Vec<SearchResult> {
     // Fetch weekly downloads from pypistats; failure leaves 0.
     let dl_url = format!(
         "https://pypistats.org/api/packages/{}/recent",
-        super::http::encode(&r.pkg.to_lowercase())
+        crate::http::encode(&r.pkg.to_lowercase())
     );
-    if let Ok(dl_body) = super::http::get(&dl_url) {
+    if let Ok(dl_body) = crate::http::get(&dl_url) {
         r.weekly_downloads = parse_pip_downloads(&dl_body);
     }
     vec![r]

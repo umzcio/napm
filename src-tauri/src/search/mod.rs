@@ -1,7 +1,6 @@
 use serde::Serialize;
 use std::path::Path;
 
-pub mod http;
 pub mod npm;
 pub mod brew;
 pub mod pip;
