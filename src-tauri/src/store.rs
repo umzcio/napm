@@ -14,6 +14,27 @@ pub struct HistoryEntry {
     pub to: String,
 }
 
+/// Which ecosystems the scan and search cover. Defaults to all enabled.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Sources {
+    pub npm: bool,
+    pub brew: bool,
+    pub pip: bool,
+    pub npx: bool,
+}
+impl Default for Sources {
+    fn default() -> Self { Sources { npm: true, brew: true, pip: true, npx: true } }
+}
+
+/// Persisted user settings. Missing or corrupt file reads as defaults.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Settings {
+    pub github_token: String,
+    pub sources: Sources,
+}
+
 /// Flat-JSON persistence for pins and history in a single directory.
 pub struct Store {
     dir: PathBuf,
@@ -68,6 +89,16 @@ impl Store {
         Self::write_json(&self.history_path(), &h);
     }
 
+    fn settings_path(&self) -> PathBuf { self.dir.join("settings.json") }
+
+    pub fn settings(&self) -> Settings {
+        Self::read_json(&self.settings_path())
+    }
+
+    pub fn set_settings(&self, s: &Settings) {
+        Self::write_json(&self.settings_path(), s);
+    }
+
     #[cfg(test)]
     pub fn dir_for_test(&self) -> PathBuf {
         self.dir.clone()
@@ -120,4 +151,28 @@ mod tests {
     }
 
     fn s_dir(s: &Store) -> PathBuf { s.dir_for_test() }
+
+    #[test]
+    fn settings_round_trip() {
+        let s = temp_store();
+        let def = s.settings();
+        assert_eq!(def.github_token, "");
+        assert!(def.sources.npm && def.sources.brew && def.sources.pip && def.sources.npx);
+        s.set_settings(&Settings { github_token: "abc".into(),
+            sources: Sources { npm: true, brew: false, pip: true, npx: true } });
+        let got = s.settings();
+        assert_eq!(got.github_token, "abc");
+        assert!(!got.sources.brew);
+        assert!(got.sources.npm && got.sources.pip);
+    }
+
+    #[test]
+    fn corrupt_settings_reads_as_defaults() {
+        let s = temp_store();
+        std::fs::create_dir_all(&s.dir_for_test()).unwrap();
+        std::fs::write(s.dir_for_test().join("settings.json"), b"not json").unwrap();
+        let def = s.settings();
+        assert_eq!(def.github_token, "");
+        assert!(def.sources.brew); // corrupt -> all sources on, no panic
+    }
 }

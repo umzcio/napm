@@ -88,6 +88,28 @@ fn get_advisory(id: String) -> Option<intel::Advisory> {
 }
 
 #[tauri::command]
+fn get_settings(app: tauri::AppHandle) -> store::Settings {
+    open_store(&app).settings()
+}
+
+#[tauri::command]
+fn set_settings(app: tauri::AppHandle, settings: store::Settings) {
+    open_store(&app).set_settings(&settings);
+}
+
+#[tauri::command]
+fn export_library(app: tauri::AppHandle, filename: String, content: String) {
+    let dir = app.path().app_data_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let _ = std::fs::create_dir_all(&dir);
+    // Sanitize the frontend-supplied filename: no path separators or traversal.
+    let safe = filename.replace(['/', '\\'], "_").replace("..", "_");
+    let path = dir.join(safe);
+    if std::fs::write(&path, content).is_ok() {
+        let _ = std::process::Command::new("open").arg(&dir).spawn();
+    }
+}
+
+#[tauri::command]
 fn open_data_dir(app: tauri::AppHandle) {
     let dir = app.path().app_data_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let _ = std::fs::create_dir_all(&dir);
@@ -132,7 +154,7 @@ fn clear_caches(app: tauri::AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
-    .invoke_handler(tauri::generate_handler![scan_installed, set_pin, get_history, run_op, search_registry, get_whats_new, get_changelog, get_advisory, open_data_dir, open_external, clear_caches])
+    .invoke_handler(tauri::generate_handler![scan_installed, set_pin, get_history, run_op, search_registry, get_whats_new, get_changelog, get_advisory, open_data_dir, open_external, clear_caches, get_settings, set_settings, export_library])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
