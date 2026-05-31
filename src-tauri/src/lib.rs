@@ -127,6 +127,16 @@ fn open_external(url: String) {
     }
 }
 
+/// Reveal and select a path in Finder (`open -R`). Validates the path exists so
+/// a stale entry never shells an arbitrary string. No-op on a missing path.
+#[tauri::command]
+fn reveal_in_finder(path: String) {
+    let p = std::path::Path::new(&path);
+    if p.exists() {
+        let _ = std::process::Command::new("open").arg("-R").arg(&path).spawn();
+    }
+}
+
 #[tauri::command]
 fn clear_caches(app: tauri::AppHandle) {
     let dir = app.path().app_data_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
@@ -157,7 +167,7 @@ fn clear_caches(app: tauri::AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
-    .invoke_handler(tauri::generate_handler![scan_installed, set_pin, get_history, run_op, search_registry, get_whats_new, get_changelog, get_advisory, open_data_dir, open_external, clear_caches, get_settings, set_settings, export_library])
+    .invoke_handler(tauri::generate_handler![scan_installed, set_pin, get_history, run_op, search_registry, get_whats_new, get_changelog, get_advisory, open_data_dir, open_external, clear_caches, get_settings, set_settings, export_library, reveal_in_finder])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
