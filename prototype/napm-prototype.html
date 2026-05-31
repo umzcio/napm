@@ -159,6 +159,7 @@
   .signal.warn{border-color:var(--amber);} .signal.danger{border-color:var(--red);} .signal.good{border-color:var(--green);}
   .signal .lbl{font-weight:bold;}
   .rec.malicious{background:#a00; color:#fff;}
+  .rec.new{background:#e0e0e0; color:#444;}
   .wire{border:1px solid var(--dgray); background:#1a1a1a; color:#d6ffd6; font-family:var(--mono); font-size:13px; margin-bottom:8px;}
   .wire-h{background:#000; color:#9f9; padding:2px 6px; font-weight:bold;}
   .wire-item{padding:4px 6px; border-top:1px solid #333; line-height:1.3;}
@@ -276,11 +277,14 @@
   var WIRE=[];
   var SECURITY_OK=true;
   var WIRE_OK=true;
+  var LOADING_FEED=false;
+  var FEED_LOADED=false;
   var REC={
     malicious:["☠ Compromised: act now","malicious"],
     security:["🛡 Update (security)","security"],
     safe:["✓ Safe to take","safe"],
-    "new":["○ New, little signal yet","new"]
+    "new":["○ New, little signal yet","new"],
+    unknown:["○ no release signal","new"]
   };
   var HANDLES=["npstr_user_2001","l33t_w4rez","fast_pipe_99","t0tally_legit","dialup_dan","cd_burner","kazaa_refugee"];
 
@@ -326,7 +330,7 @@
                  : off ? '<button class="btn rowbtn" data-get="'+i+'">Install</button>' : '<span class="muted">—</span>';
       tr.innerHTML=
         '<td class="glyph '+g[1]+'"'+(gTitle?' title="'+gTitle+'"':'')+'>'+g[0]+'</td>'+
-        '<td>'+(t.pinned?'📌 ':'')+esc(t.name)+' <span class="src '+t.eco+'">'+t.eco+'</span>'+
+        '<td>'+(t.pinned?'📌 ':'')+esc(t.name)+' <span class="src '+esc(t.eco)+'">'+esc(t.eco)+'</span>'+
           (t.description?'<span class="toold">'+esc(t.description)+'</span>':'')+'</td>'+
         '<td class="'+(off?'muted':'')+'">'+(t.installed||"—")+'</td>'+
         '<td class="'+(npx?'muted':safe?'vernew':held?'verhold':'muted')+'">'+(npx?"—":t.latest)+'</td>'+
@@ -387,7 +391,7 @@
         '<td class="pkgcell"><b>'+esc(p.name)+'</b>'+fire+pipTag+' <span class="muted">'+esc(p.pkg)+'</span><span class="desc">'+esc(p.description)+'</span></td>'+
         '<td class="user">'+esc(p.version)+'</td>'+
         '<td class="dl">'+fmtDl(p.weeklyDownloads)+'</td>'+
-        '<td><span class="src '+p.eco+'">'+p.eco+'</span></td>'+
+        '<td><span class="src '+esc(p.eco)+'">'+esc(p.eco)+'</span></td>'+
         '<td class="muted">'+(p.size||"—")+'</td>'+
         '<td>'+act+'</td></tr>';
     }).join("");
@@ -425,7 +429,9 @@
   }
   function loadWhatsNew(){
     var inv=window.__TAURI__&&window.__TAURI__.core&&window.__TAURI__.core.invoke;
-    if(!inv){ FEED=[]; WIRE=[]; renderFeed(); return; }
+    if(!inv){ FEED=[]; WIRE=[]; SECURITY_OK=false; WIRE_OK=false; renderFeed(); return; }
+    if(LOADING_FEED) return;
+    LOADING_FEED=true;
     document.getElementById("feed").innerHTML='<div class="searching">Checking the swarm for advisories…</div>';
     var installed=TOOLS.filter(function(t){return t.installed;}).map(function(t){
       return {pkg:t.pkg, eco:t.eco, installed:t.installed, latest:t.latest};
@@ -448,16 +454,18 @@
       });
       (r.verdicts||[]).forEach(function(v){
         var ti=findToolIdx(v.pkg, v.eco);
-        feed.push({ti:ti, pkg:v.pkg, eco:v.eco, rec:v.recommendation==="unknown"?"new":v.recommendation,
+        feed.push({ti:ti, pkg:v.pkg, eco:v.eco, rec:v.recommendation,
           age:v.ageLabel||"signal unknown", blurb:reBlurb(v), changelog:[], loaded:false,
           signals:[], fix:null, link:""});
       });
+      LOADING_FEED=false; FEED_LOADED=true;
       FEED=feed; renderFeed(); renderStatus();
-    }).catch(function(){ FEED=[]; WIRE=[]; SECURITY_OK=false; WIRE_OK=false; renderFeed(); });
+    }).catch(function(){ LOADING_FEED=false; FEED=[]; WIRE=[]; SECURITY_OK=false; WIRE_OK=false; renderFeed(); });
   }
   function reBlurb(v){
     if(v.recommendation==="safe") return "Settled release, no advisories. Safe to take.";
     if(v.recommendation==="new") return "Fresh release with little signal yet. Your call.";
+    if(v.recommendation==="unknown") return "No release-age signal available for this source.";
     return "No release-age signal available for this source.";
   }
   function findToolIdx(pkg, eco){ for(var i=0;i<TOOLS.length;i++) if(TOOLS[i].pkg===pkg && TOOLS[i].eco===eco) return i; return -1; }
@@ -492,6 +500,7 @@
       var body;
       if(isAlert){
         var txt = it.fix ? ("fixed in "+esc(it.fix))
+          : it.detailFailed ? "advisory detail unavailable"
           : !it.detailLoaded ? "expand for advisory detail"
           : it.rec==="malicious" ? "no fixed version published, consider removing"
           : "no fixed version listed in the advisory";
@@ -510,9 +519,9 @@
     });
   }
   function removeCmd(it){
-    if(it.eco==="npm"||it.eco==="npx") return "npm rm -g "+it.pkg;
-    if(it.eco==="pip") return "pip uninstall "+it.pkg;
-    return "brew uninstall "+it.pkg;
+    if(it.eco==="npm"||it.eco==="npx") return "npm rm -g '"+it.pkg+"'";
+    if(it.eco==="pip") return "pip uninstall '"+it.pkg+"'";
+    return "brew uninstall '"+it.pkg+"'";
   }
   document.getElementById("feed").addEventListener("click",function(e){
     var h=e.target.closest("[data-card]");
@@ -532,7 +541,7 @@
               it.detailLoaded=true;
               if(d){ if(d.summary) it.blurb=d.summary; if(d.fixedVersion) it.fix=d.fixedVersion; }
               renderFeed();
-            }).catch(function(){ it.detailLoaded=true; renderFeed(); });
+            }).catch(function(){ it.detailFailed=true; it.detailLoaded=true; renderFeed(); });
           } else if(!it.id){
             // verdict card: lazy-load the changelog
             var ver=it.fix||(it.ti>=0?TOOLS[it.ti].latest:it.pkg);
@@ -628,7 +637,7 @@
     var titles={library:"Shared Library",search:"Search",whatsnew:"What's New",transfers:"Transfers"};
     document.querySelector(".titlebar .title").textContent="- npstr AI Package Manager ["+titles[name]+"]";
   }
-  document.querySelectorAll(".tab").forEach(function(t){ t.addEventListener("click",function(){ if(t.dataset.view==="search") runSearch(lastQuery); else { if(t.dataset.view==="whatsnew") loadWhatsNew(); switchTab(t.dataset.view); } }); });
+  document.querySelectorAll(".tab").forEach(function(t){ t.addEventListener("click",function(){ if(t.dataset.view==="search") runSearch(lastQuery); else { if(t.dataset.view==="whatsnew" && !FEED_LOADED) loadWhatsNew(); switchTab(t.dataset.view); } }); });
 
   // Window controls: the OS window is frameless, so the Win98 titlebar IS the
   // titlebar. Dragging is handled natively via data-tauri-drag-region; here we
@@ -652,11 +661,11 @@
 
   function scanLibrary(){
     var inv = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
-    if(!inv){ renderRows(); loadWhatsNew(); renderStatus(); return; }
+    if(!inv){ renderRows(); FEED_LOADED=false; loadWhatsNew(); renderStatus(); return; }
     inv("scan_installed").then(function(tools){
       TOOLS = tools || [];
-      renderRows(); loadWhatsNew(); renderStatus();
-    }).catch(function(e){ console.error("scan_installed failed", e); renderRows(); loadWhatsNew(); renderStatus(); });
+      renderRows(); FEED_LOADED=false; loadWhatsNew(); renderStatus();
+    }).catch(function(e){ console.error("scan_installed failed", e); renderRows(); FEED_LOADED=false; loadWhatsNew(); renderStatus(); });
   }
   // Update appetite dial: load saved level, label it, re-classify live on drag.
   (function(){
@@ -683,6 +692,7 @@
       x.done=true; x.ok=e.payload.success;
       if(x.ok && x.ti!=null && TOOLS[x.ti]){ TOOLS[x.ti].installed=x.to; }
       renderXfers(); renderRows();
+      FEED_LOADED=false;
       loadHistory();
     });
   })();
