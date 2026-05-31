@@ -50,6 +50,26 @@ function** (no decorative jokes).
   M3 Transfers path. New `src-tauri/src/search/` module (blocking `ureq` behind a
   single `http.rs`), one `search_registry` command.
 
+## In progress: M4.1 - Search performance
+
+M4 was built blocking and sequential to get it correct first. A warm search
+takes a few seconds, which is too slow. This pass removes the avoidable latency
+without changing behavior or honesty:
+
+- **Run the three sources concurrently** (`std::thread::scope`) so total time is
+  the slowest source, not the sum of all three. Biggest single win.
+- **One process-global `ureq` agent** so connections keep-alive instead of a new
+  TLS handshake per request.
+- **Hold the parsed brew catalog in memory** (parse once per process, not the
+  multi-MB re-parse every search), behind the existing 24h disk cache.
+- **Warm the brew catalog in a background thread at launch** so the first search
+  is never cold.
+- **Parallelize npm's per-scoped download lookups** instead of one sequential
+  call per scoped package.
+
+Target: a warm search well under a second. Pure parsers and the
+fail-independently behavior are preserved.
+
 ## Next: M5 - What's New (the decision feed)
 
 One card per available update: should you take it, and why.
