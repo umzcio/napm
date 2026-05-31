@@ -567,6 +567,30 @@
     if(it.eco==="pip") return "pip uninstall '"+it.pkg+"'";
     return "brew uninstall '"+it.pkg+"'";
   }
+  function registryUrl(eco, pkg){
+    if(eco==="npm"||eco==="npx") return "https://www.npmjs.com/package/"+pkg;
+    if(eco==="brew") return "https://formulae.brew.sh/formula/"+pkg;
+    if(eco==="pip") return "https://pypi.org/project/"+pkg+"/";
+    return null;
+  }
+  function installCmd(eco, pkg, version){
+    if(eco==="pip") return "pip install "+pkg+(version?"=="+version:"");
+    if(eco==="brew") return "brew install "+pkg;
+    return "npm i -g "+pkg+(version?"@"+version:""); // npm / npx
+  }
+  function openExt(url){ var i=inv(); if(i && url) i("open_external",{url:url}); }
+  // Most recent prior version for a tool from the loaded history (newest-first),
+  // used by the library Roll back item. Null when none.
+  function priorVersion(pkg, eco){
+    for(var k=0;k<history.length;k++){ var h=history[k];
+      if(h.pkg===pkg && h.eco===eco && h.action!=="rollback" && h.from) return h.from; }
+    return null;
+  }
+  function togglePin(i){
+    var t=TOOLS[i]; if(!t) return;
+    t.pinned=!t.pinned; renderRows();
+    var iv=inv(); if(iv) iv("set_pin",{pkg:t.pkg,pinned:t.pinned});
+  }
   document.getElementById("feed").addEventListener("click",function(e){
     var h=e.target.closest("[data-card]");
     if(h){
@@ -620,9 +644,9 @@
     badge.textContent=active; badge.style.display=active?"":"none";
   }
   function loadHistory(){
-    var inv=window.__TAURI__&&window.__TAURI__.core&&window.__TAURI__.core.invoke;
-    if(!inv){ renderHistory([]); return; }
-    inv("get_history").then(function(h){ renderHistory(h||[]); }).catch(function(){ renderHistory([]); });
+    var iv=inv();
+    if(!iv){ history=[]; renderHistory([]); return; }
+    iv("get_history").then(function(h){ history=h||[]; renderHistory(history); }).catch(function(){ history=[]; renderHistory([]); });
   }
   function renderHistory(hist){
     if(!hist || !hist.length){ histWrap.innerHTML='<div class="empty">No version changes yet.</div>'; return; }
@@ -667,11 +691,7 @@
   });
   rowsEl.addEventListener("click",function(e){
     var p=e.target.closest("[data-pin]");
-    if(p){ e.stopPropagation(); var i=+p.dataset.pin; var nowPinned=!TOOLS[i].pinned;
-      TOOLS[i].pinned=nowPinned; renderRows();
-      var inv=window.__TAURI__&&window.__TAURI__.core&&window.__TAURI__.core.invoke;
-      if(inv) inv("set_pin",{pkg:TOOLS[i].pkg,pinned:nowPinned});
-      return; }
+    if(p){ e.stopPropagation(); togglePin(+p.dataset.pin); return; }
     var b=e.target.closest("[data-get]");
     if(b){ e.stopPropagation(); var j=+b.dataset.get; queueTransfer(j,TOOLS[j].latest,TOOLS[j].installed?"update":"install"); switchTab("transfers"); }
   });
