@@ -97,6 +97,33 @@ A real signed/bundled macOS `.app` for daily use. Fix the bundle identifier
 (currently `com.tauri.dev` -> `com.napm.app`). Resolve the npm/brew PATH for
 Finder-launched apps (dev inherits the terminal PATH; a bundled app may not).
 
+## M8 - Manual / standalone installs (best-effort source)
+
+A fifth source for tools installed outside any package manager - the ones
+dropped by `curl | bash` install scripts or direct downloads. Examples on the
+owner's machine: the **xAI CLI** (`curl https://x.ai/cli/install.sh | bash` ->
+`~/.grok/bin/grok` -> `grok-0.2.14-macos-aarch64`) and the **Google Antigravity
+CLI** (`curl https://antigravity.google/cli/install.sh | bash`). napm's four
+package-manager sources cannot see these because no package manager installed
+them.
+
+This is honestly the hardest and most degraded source, label it clearly (like
+the pip search gap):
+
+- **Detection:** scan PATH plus known install dirs (`~/.grok/bin`,
+  `~/.local/bin`, `/usr/local/bin`, tool-specific dirs) for executables that no
+  package manager claims.
+- **Version:** no manifest. Sometimes the layout encodes it (grok ->
+  `grok-0.2.14-...`); otherwise fall back to running `<tool> --version` and
+  parsing wildly varying output. Best-effort, often blank.
+- **Latest / update:** no registry and no uniform updater. Most we can do is
+  "re-run the install script" or link to the project; no reliable safe/held
+  classification or one-click Get for these. Do NOT fake an update path that
+  does not exist.
+
+Scope: list the tool and a best-effort version, mark the source clearly as
+"manual / unmanaged," and be honest that updates are mostly out of napm's hands.
+
 ## Deferred on purpose
 
 - `hold` issue-velocity scoring (needs GitHub issue-rate data + judgment) - v1.5.
