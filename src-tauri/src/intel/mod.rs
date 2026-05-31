@@ -29,7 +29,7 @@ pub struct SecurityAlert {
 }
 
 /// One recent ecosystem malware advisory (Layer 2, the wire).
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WireItem {
     pub id: String,

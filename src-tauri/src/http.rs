@@ -35,6 +35,18 @@ pub(crate) fn post_json(url: &str, body: &str) -> Result<String, String> {
     }
 }
 
+/// GET a URL with additional request headers, sharing the same agent.
+pub(crate) fn get_with_headers(url: &str, headers: &[(&str, &str)]) -> Result<String, String> {
+    let mut req = agent().get(url);
+    for (k, v) in headers {
+        req = req.set(k, v);
+    }
+    match req.call() {
+        Ok(resp) => resp.into_string().map_err(|e| e.to_string()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 /// Percent-encode a query value (encode everything except RFC 3986 unreserved).
 pub(crate) fn encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
