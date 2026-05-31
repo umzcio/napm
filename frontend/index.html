@@ -767,7 +767,9 @@
       {label:"Quit", run:quitApp}
     ],
     edit: [
-      {label:"Copy tool details", disabled:function(){ return selected==null || !TOOLS[selected]; }, run:copyToolDetails}
+      {label:"Copy tool details", disabled:function(){ return selected==null || !TOOLS[selected]; }, run:copyToolDetails},
+      {sep:true},
+      {label:"Preferences...", run:function(){ if(window.showPrefs) showPrefs(); }}
     ],
     view: [
       {label:"Only tools I installed", checked:function(){return VIEW.requested;}, run:function(){toggleView("requested");}},
@@ -838,6 +840,24 @@
   document.addEventListener("keydown",function(e){ if(e.key==="Escape"){ if(openMenuName!=null) closeMenu(); else closeModal(); } });
 
   function closeModal(){ document.getElementById("modalBack").style.display="none"; }
+  window.showPrefs=function(){
+    var i=inv(); if(!i) return;
+    i("get_settings").then(function(s){
+      s=s||{}; var src=s.sources||{npm:true,brew:true,pip:true,npx:true};
+      var rows=["npm","brew","pip","npx"].map(function(k){
+        return '<label style="display:block;margin-top:2px"><input type="checkbox" id="prefSrc_'+k+'"'+(src[k]!==false?' checked':'')+'> '+k+'</label>';
+      }).join("");
+      var box=document.getElementById("modalBox");
+      box.innerHTML='<div class="m-h">Preferences<span class="x" data-close>×</span></div>'+
+        '<div class="m-b">'+
+        '<div><b>GitHub token</b><div class="muted" style="font-size:11px">optional - raises the GitHub API rate limit for changelogs and the supply-chain wire.</div>'+
+        '<input id="prefToken" class="search" style="width:100%;margin-top:4px" value="'+esc(s.githubToken||"")+'"></div>'+
+        '<div style="margin-top:10px"><b>Sources</b>'+rows+'</div>'+
+        '<div style="margin-top:12px;text-align:right"><button class="btn" data-close>Cancel</button> <button class="btn primary" data-prefs-save>Save</button></div>'+
+        '</div>';
+      document.getElementById("modalBack").style.display="flex";
+    }).catch(function(){});
+  };
   window.showAbout=function(){
     var box=document.getElementById("modalBox");
     var ver = window.__appVer || "";
@@ -850,6 +870,21 @@
     document.getElementById("modalBack").style.display="flex";
   };
   document.getElementById("modalBack").addEventListener("click",function(e){
+    if(e.target.hasAttribute("data-prefs-save")){
+      var settings={
+        githubToken:(document.getElementById("prefToken").value||"").trim(),
+        sources:{
+          npm:document.getElementById("prefSrc_npm").checked,
+          brew:document.getElementById("prefSrc_brew").checked,
+          pip:document.getElementById("prefSrc_pip").checked,
+          npx:document.getElementById("prefSrc_npx").checked
+        }
+      };
+      var i=inv(); if(i) i("set_settings",{settings:settings});
+      closeModal();
+      FEED_LOADED=false; scanLibrary(); // rescan with the new sources, refresh the feed
+      return;
+    }
     if(e.target.id==="modalBack" || e.target.hasAttribute("data-close")) { closeModal(); return; }
     if(e.target.hasAttribute("data-repo")){ e.preventDefault(); var i=inv(); if(i) i("open_external",{url:"https://github.com/umzcio/napm"}); }
   });
