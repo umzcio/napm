@@ -22,9 +22,10 @@ pub struct Sources {
     pub brew: bool,
     pub pip: bool,
     pub npx: bool,
+    pub manual: bool,
 }
 impl Default for Sources {
-    fn default() -> Self { Sources { npm: true, brew: true, pip: true, npx: true } }
+    fn default() -> Self { Sources { npm: true, brew: true, pip: true, npx: true, manual: true } }
 }
 
 /// Persisted user settings. Missing or corrupt file reads as defaults.
@@ -159,7 +160,7 @@ mod tests {
         assert_eq!(def.github_token, "");
         assert!(def.sources.npm && def.sources.brew && def.sources.pip && def.sources.npx);
         s.set_settings(&Settings { github_token: "abc".into(),
-            sources: Sources { npm: true, brew: false, pip: true, npx: true } });
+            sources: Sources { npm: true, brew: false, pip: true, npx: true, manual: true } });
         let got = s.settings();
         assert_eq!(got.github_token, "abc");
         assert!(!got.sources.brew);
@@ -178,14 +179,14 @@ mod tests {
 
     #[test]
     fn partial_settings_keeps_other_sources_on() {
-        // A settings.json that only disables npm must keep brew/pip/npx on,
+        // A settings.json that only disables npm must keep brew/pip/npx/manual on,
         // never drop the unspecified sources to false.
         let s = temp_store();
         std::fs::create_dir_all(&s.dir_for_test()).unwrap();
         std::fs::write(s.dir_for_test().join("settings.json"), br#"{"sources":{"npm":false}}"#).unwrap();
         let got = s.settings();
         assert!(!got.sources.npm);
-        assert!(got.sources.brew && got.sources.pip && got.sources.npx);
+        assert!(got.sources.brew && got.sources.pip && got.sources.npx && got.sources.manual);
         assert_eq!(got.github_token, "");
     }
 }
