@@ -51,13 +51,15 @@ pub(crate) fn path_mtime(path: &std::path::Path) -> i64 {
         .unwrap_or(0)
 }
 
-/// Aggregate across all sources. A source whose tool is absent contributes
-/// nothing (its scanner returns an empty Vec).
-pub fn scan_all() -> Vec<InstalledTool> {
+/// Aggregate across all sources, marking rows whose pkg is in `pins`.
+pub fn scan_all(pins: &std::collections::BTreeSet<String>) -> Vec<InstalledTool> {
     let mut all = Vec::new();
     all.extend(npm::scan_npm());
     all.extend(brew::scan_brew());
     all.extend(pip::scan_pip());
     all.extend(npx::scan_npx());
+    for row in all.iter_mut() {
+        row.pinned = pins.contains(&row.pkg);
+    }
     all
 }
