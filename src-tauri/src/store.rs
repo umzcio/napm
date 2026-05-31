@@ -106,6 +106,25 @@ impl Store {
     }
 }
 
+/// One-time, best-effort migration of user-data files from a legacy app-data
+/// directory into the current one. Only `pins/history/settings.json` are copied,
+/// and only when the target does not already exist (never clobber newer data).
+/// Caches are intentionally skipped (they regenerate). No-op if the legacy dir
+/// is absent. Any IO error is ignored so this never blocks startup.
+pub fn migrate_legacy(current_dir: &Path, legacy_dir: &Path) {
+    if !legacy_dir.is_dir() {
+        return;
+    }
+    let _ = std::fs::create_dir_all(current_dir);
+    for f in ["pins.json", "history.json", "settings.json"] {
+        let dst = current_dir.join(f);
+        let src = legacy_dir.join(f);
+        if !dst.exists() && src.exists() {
+            let _ = std::fs::copy(&src, &dst);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,5 +207,53 @@ mod tests {
         assert!(!got.sources.npm);
         assert!(got.sources.brew && got.sources.pip && got.sources.npx && got.sources.manual);
         assert_eq!(got.github_token, "");
+    }
+
+    #[test]
+    fn migrate_copies_user_files_when_target_missing() {
+        let legacy = temp_store();
+        std::fs::write(legacy.dir_for_test().join("history.json"), b"[{\"old\":1}]").unwrap();
+        std::fs::write(legacy.dir_for_test().join("pins.json"), b"[\"typescript\"]").unwrap();
+        // a cache file that must NOT be migrated
+        std::fs::write(legacy.dir_for_test().join("wire.json"), b"{}").unwrap();
+
+        let mut current = std::env::temp_dir();
+        current.push(format!("napm-test-cur-{:p}", &legacy));
+        let _ = std::fs::remove_dir_all(&current);
+
+        migrate_legacy(&current, &legacy.dir_for_test());
+
+        assert_eq!(std::fs::read(current.join("history.json")).unwrap(), b"[{\"old\":1}]");
+        assert!(current.join("pins.json").exists());
+        assert!(!current.join("wire.json").exists()); // caches not migrated
+    }
+
+    #[test]
+    fn migrate_never_clobbers_existing() {
+        let legacy = temp_store();
+        std::fs::write(legacy.dir_for_test().join("history.json"), b"LEGACY").unwrap();
+
+        let mut current = std::env::temp_dir();
+        current.push(format!("napm-test-cur2-{:p}", &legacy));
+        let _ = std::fs::remove_dir_all(&current);
+        std::fs::create_dir_all(&current).unwrap();
+        std::fs::write(current.join("history.json"), b"CURRENT").unwrap();
+
+        migrate_legacy(&current, &legacy.dir_for_test());
+
+        assert_eq!(std::fs::read(current.join("history.json")).unwrap(), b"CURRENT");
+    }
+
+    #[test]
+    fn migrate_absent_legacy_is_noop() {
+        let mut legacy = std::env::temp_dir();
+        legacy.push(format!("napm-test-missing-{:p}", &legacy));
+        let _ = std::fs::remove_dir_all(&legacy);
+        let mut current = std::env::temp_dir();
+        current.push(format!("napm-test-cur3-{:p}", &current));
+        let _ = std::fs::remove_dir_all(&current);
+
+        migrate_legacy(&current, &legacy); // must not panic
+        assert!(!current.join("history.json").exists());
     }
 }
