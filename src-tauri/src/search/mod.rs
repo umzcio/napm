@@ -43,11 +43,19 @@ pub fn merge(sources: Vec<Vec<SearchResult>>) -> Vec<SearchResult> {
 pub fn search_all(query: &str, cache_dir: &Path) -> Vec<SearchResult> {
     let query = query.trim();
     if query.is_empty() { return Vec::new(); }
-    merge(vec![
-        npm::search_npm(query),
-        brew::search_brew(query, cache_dir),
-        pip::search_pip(query),
-    ])
+    // Fan out the three sources concurrently: total latency becomes the slowest
+    // source, not the sum. A panicking source thread degrades to an empty list,
+    // so one dead registry still never blanks the grid.
+    std::thread::scope(|s| {
+        let n = s.spawn(|| npm::search_npm(query));
+        let b = s.spawn(|| brew::search_brew(query, cache_dir));
+        let p = s.spawn(|| pip::search_pip(query));
+        merge(vec![
+            n.join().unwrap_or_default(),
+            b.join().unwrap_or_default(),
+            p.join().unwrap_or_default(),
+        ])
+    })
 }
 
 #[cfg(test)]
