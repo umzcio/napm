@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>napm v0.9b - npstr AI Package Manager</title>
+<title>napm - npstr AI Package Manager</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
@@ -32,6 +32,8 @@
     user-select:none; flex:0 0 auto; cursor:default;}
   .titlebar .logo{font-family:var(--mono); font-size:20px; line-height:1;
     color:#7CFC00; text-shadow:1px 1px 0 #003300; letter-spacing:1px;}
+  .titlebar .ver{font-family:var(--mono); font-size:10px; color:rgba(255,255,255,.7);
+    align-self:flex-end; padding-bottom:3px; margin-left:-2px; letter-spacing:.5px;}
   .titlebar .title{font-weight:bold; font-size:11px;}
   .titlebar .spacer{flex:1;}
   .tb-btn{width:16px; height:14px; background:var(--face); display:flex;
@@ -179,7 +181,7 @@
 
 <div class="window raised" id="win">
   <div class="titlebar" id="titlebar" data-tauri-drag-region>
-    <img class="brand" src="npstr-logo.svg" alt="npstr" data-tauri-drag-region><span class="logo" data-tauri-drag-region>napm</span>
+    <img class="brand" src="npstr-logo.svg" alt="npstr" data-tauri-drag-region><span class="logo" data-tauri-drag-region>napm</span><span class="ver" id="appVer" data-tauri-drag-region></span>
     <span class="title" data-tauri-drag-region>- npstr AI Package Manager [Shared Library]</span>
     <span class="spacer" data-tauri-drag-region></span>
     <span class="tb-btn" id="tb-min" title="Minimize">_</span><span class="tb-btn" id="tb-max" title="Maximize">▢</span><span class="tb-btn" id="tb-close" title="Close">✕</span>
@@ -566,6 +568,20 @@
       loadHistory();
     });
   })();
+  // Show the real app version in the wordmark, like "napm v0.1.0", echoing the
+  // era's beta titlebars. Pulled live from Tauri (Cargo.toml / tauri.conf.json),
+  // so it never drifts from what shipped. In a plain browser preview the Tauri
+  // app bridge is absent, so the version simply stays blank.
+  function setAppVersion(){
+    var app=window.__TAURI__&&window.__TAURI__.app;
+    if(!app||!app.getVersion) return;
+    app.getVersion().then(function(v){
+      var el=document.getElementById("appVer");
+      if(el) el.textContent="v"+v;
+      document.title="napm v"+v+" - npstr AI Package Manager";
+    }).catch(function(){});
+  }
+  setAppVersion();
   renderXfers(); loadHistory(); runSearch(""); nextStep(); scanLibrary();
 })();
 </script>
