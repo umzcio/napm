@@ -98,6 +98,9 @@
   /* search results */
   .pkgcell{white-space:normal; max-width:330px;}
   .pkgcell .desc{display:block; color:var(--dgray); font-size:11px; margin-top:1px;}
+  .toold{display:block; color:var(--dgray); font-size:11px; margin-top:1px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:360px;}
+  tr.sel .toold{color:#cfcfe8;}
   .dl{font-family:var(--mono); font-size:15px;}
   .fire{color:var(--red);}
   .searching{padding:26px; text-align:center; color:var(--dgray); font-family:var(--mono); font-size:16px;}
@@ -195,7 +198,7 @@
       <table>
         <thead><tr>
           <th></th><th>Tool</th><th>Installed</th><th>Latest</th>
-          <th>Shared By</th><th>Size</th><th>Ping</th><th>Pin</th><th></th>
+          <th>Shared By</th><th>Size</th><th>Updated</th><th>Pin</th><th></th>
         </tr></thead>
         <tbody id="rows"></tbody>
       </table>
@@ -274,6 +277,10 @@
   function ping(n){ var h=0; for(var i=0;i<n.length;i++) h=(h*31+n.charCodeAt(i))>>>0; return 8+(h%320); }
   function handleFor(n){ var h=0; for(var i=0;i<n.length;i++) h=(h*31+n.charCodeAt(i))>>>0; return HANDLES[h%HANDLES.length]; }
   function fmtDl(n){ if(n>=1e6) return (n/1e6).toFixed(n>=1e7?0:1).replace(/\.0$/,"")+"M"; if(n>=1e3) return Math.round(n/1e3)+"K"; return ""+n; }
+  function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+  function ago(ts){ if(!ts) return "—"; var d=Math.floor((Date.now()/1000-ts)/86400);
+    if(d<0) d=0; if(d<1) return "today"; if(d<7) return d+"d"; if(d<30) return Math.floor(d/7)+"w";
+    if(d<365) return Math.floor(d/30)+"mo"; return Math.floor(d/365)+"y"; }
   function findTool(pkg){ for(var i=0;i<TOOLS.length;i++) if(TOOLS[i].pkg===pkg) return i; return -1; }
 
   var selected=null, lastQuery="";
@@ -293,12 +300,13 @@
                  : off ? '<button class="btn rowbtn" data-get="'+i+'">Install</button>' : '<span class="muted">—</span>';
       tr.innerHTML=
         '<td class="glyph '+g[1]+'">'+g[0]+'</td>'+
-        '<td>'+(t.pinned?'📌 ':'')+t.name+' <span class="src '+t.eco+'">'+t.eco+'</span></td>'+
+        '<td>'+(t.pinned?'📌 ':'')+esc(t.name)+' <span class="src '+t.eco+'">'+t.eco+'</span>'+
+          (t.description?'<span class="toold">'+esc(t.description)+'</span>':'')+'</td>'+
         '<td class="'+(off?'muted':'')+'">'+(t.installed||"—")+'</td>'+
         '<td class="'+(st==="update"&&!npx?'vernew':'muted')+'">'+(npx?"—":t.latest)+'</td>'+
         '<td class="user'+(t.publisher?'':' muted')+'">@'+(t.publisher||"unknown")+'</td>'+
         '<td class="muted">'+t.size+'</td>'+
-        '<td class="muted">'+(off?"----":ping(t.name)+"ms")+'</td>'+
+        '<td class="muted">'+ago(t.updated)+'</td>'+
         '<td><span class="pin '+(t.pinned?'on':'')+'" data-pin="'+i+'" title="freeze version, skip Update All">📌</span></td>'+
         '<td>'+action+'</td>';
       tr.addEventListener("click",function(){selected=i; renderRows();});
