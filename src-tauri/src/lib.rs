@@ -78,10 +78,19 @@ fn get_changelog(app: tauri::AppHandle, eco: String, pkg: String, version: Strin
     intel::release::changelog(&eco, &pkg, &version, &dir)
 }
 
+#[tauri::command]
+fn get_advisory(id: String) -> Option<intel::Advisory> {
+    intel::osv::fetch_advisory(&id).map(|(severity, summary, fixed_version)| intel::Advisory {
+        severity,
+        summary,
+        fixed_version,
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
-    .invoke_handler(tauri::generate_handler![scan_installed, set_pin, get_history, run_op, search_registry, get_whats_new, get_changelog])
+    .invoke_handler(tauri::generate_handler![scan_installed, set_pin, get_history, run_op, search_registry, get_whats_new, get_changelog, get_advisory])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(

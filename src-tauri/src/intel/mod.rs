@@ -52,6 +52,15 @@ pub struct ReleaseInfo {
     pub recommendation: String,      // "safe" | "new" | "unknown"
 }
 
+/// Lazily-loaded detail for a single advisory (fetched when a card is expanded).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Advisory {
+    pub severity: String,
+    pub summary: String,
+    pub fixed_version: Option<String>,
+}
+
 /// Whether the OSV security check actually ran. The frontend must never imply
 /// "safe" when the check could not run, so this is explicit.
 #[derive(Debug, Clone, PartialEq, Serialize)]

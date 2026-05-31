@@ -92,24 +92,46 @@ pub fn scan_security(installed: &[ToolRef]) -> Option<Vec<SecurityAlert>> {
         Some((*t, first))
     }).collect();
 
-    // Fetch advisory details in parallel.
+    // Severity is encoded in the advisory id (MAL- = malicious), so it needs no
+    // network call. Build the vulnerable alerts immediately with no detail fetch
+    // (these are the bulk; their summary and fixed version load lazily when a
+    // card is expanded). Fetch full detail only for the rare malicious alerts, so
+    // the remove-vs-fix decision is correct upfront.
     let mut alerts: Vec<SecurityAlert> = Vec::new();
+    let mut malicious: Vec<(&ToolRef, String)> = Vec::new();
+    for (t, id) in flagged {
+        if id.starts_with("MAL-") {
+            malicious.push((t, id));
+        } else {
+            let link = format!("https://osv.dev/vulnerability/{}", id);
+            alerts.push(SecurityAlert {
+                pkg: t.pkg.clone(), eco: t.eco.clone(), severity: "vulnerable".into(),
+                id, summary: String::new(), installed: t.installed.clone().unwrap_or_default(),
+                fixed_version: None, link,
+            });
+        }
+    }
+
+    // Malicious are rare; fetch their details in parallel so the card knows
+    // upfront whether a fixed version exists or removal is the only remedy.
     std::thread::scope(|s| {
-        let handles: Vec<_> = flagged.iter().map(|(t, id)| {
+        let handles: Vec<_> = malicious.iter().map(|(t, id)| {
             let id = id.clone();
             let pkg = t.pkg.clone();
             let eco = t.eco.clone();
             let installed_ver = t.installed.clone().unwrap_or_default();
-            s.spawn(move || -> Option<SecurityAlert> {
-                let url = format!("https://api.osv.dev/v1/vulns/{}", id);
-                let detail = crate::http::get(&url).ok()?;
-                let (severity, summary, fixed_version) = parse_osv_vuln(&detail)?;
+            s.spawn(move || -> SecurityAlert {
                 let link = format!("https://osv.dev/vulnerability/{}", id);
-                Some(SecurityAlert { pkg, eco, severity, id, summary, installed: installed_ver, fixed_version, link })
+                let (summary, fixed_version) = crate::http::get(&format!("https://api.osv.dev/v1/vulns/{}", id))
+                    .ok()
+                    .and_then(|d| parse_osv_vuln(&d))
+                    .map(|(_, sum, fixed)| (sum, fixed))
+                    .unwrap_or_default();
+                SecurityAlert { pkg, eco, severity: "malicious".into(), id, summary, installed: installed_ver, fixed_version, link }
             })
         }).collect();
         for h in handles {
-            if let Some(alert) = h.join().ok().flatten() {
+            if let Ok(alert) = h.join() {
                 alerts.push(alert);
             }
         }
@@ -122,6 +144,13 @@ pub fn scan_security(installed: &[ToolRef]) -> Option<Vec<SecurityAlert>> {
     });
 
     Some(alerts)
+}
+
+/// Fetch and classify a single advisory by id. Used for lazy detail loading when
+/// a vulnerable card is expanded. Returns (severity, summary, fixed_version).
+pub fn fetch_advisory(id: &str) -> Option<(String, String, Option<String>)> {
+    let detail = crate::http::get(&format!("https://api.osv.dev/v1/vulns/{}", id)).ok()?;
+    parse_osv_vuln(&detail)
 }
 
 #[cfg(test)]
