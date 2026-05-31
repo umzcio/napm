@@ -651,8 +651,8 @@
   function renderXfers(){
     if(!xfers.length){ xferListEl.innerHTML='<div class="empty">Nothing transferring.</div>'; }
     else{ xferListEl.innerHTML="";
-      xfers.forEach(function(x){
-        var d=document.createElement("div"); d.className="xfer-row raised";
+      xfers.forEach(function(x,xi){
+        var d=document.createElement("div"); d.className="xfer-row raised"; d.dataset.i=xi;
         var body=x.lines.map(function(l){ return '<span class="'+(l.stream==="stderr"?"err":"")+'">'+esc(l.line)+'</span>'; }).join("\n");
         var stat=x.done?('<div class="xstat '+(x.ok?"ok":"fail")+'">'+(x.ok?"✓ complete":"✗ failed")+'</div>'):"";
         d.innerHTML='<div class="xfer-top"><div class="name">'+esc(x.name)+'</div><div class="from">@'+esc(x.user)+'</div>'+
@@ -672,13 +672,13 @@
   }
   function renderHistory(hist){
     if(!hist || !hist.length){ histWrap.innerHTML='<div class="empty">No version changes yet.</div>'; return; }
-    var rows=hist.map(function(h){
+    var rows=hist.map(function(h,hi){
       var label=h.action==="update"?"updated":h.action==="rollback"?"rolled back":"installed";
       var canRoll = h.action!=="rollback" && h.from && h.eco!=="brew";
       var rb=canRoll?'<button class="btn rowbtn" data-roll-pkg="'+esc(h.pkg)+'" data-roll-eco="'+esc(h.eco)+'" data-roll-from="'+esc(h.from)+'">Roll back</button>'
                     :'<span class="muted" title="'+(h.eco==="brew"?"Homebrew cannot downgrade":"")+'">\u2014</span>';
       var when=new Date(h.ts*1000).toLocaleString([], {month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
-      return '<tr><td class="t">'+esc(when)+'</td><td><b>'+esc(h.pkg)+'</b></td><td class="act-'+esc(h.action)+'">'+label+'</td>'+
+      return '<tr data-i="'+hi+'"><td class="t">'+esc(when)+'</td><td><b>'+esc(h.pkg)+'</b></td><td class="act-'+esc(h.action)+'">'+label+'</td>'+
         '<td class="user">'+esc(h.from||"\u2014")+' \u2192 '+esc(h.to)+'</td><td>'+rb+'</td></tr>';
     }).join("");
     histWrap.innerHTML='<table class="hist"><tbody>'+rows+'</tbody></table>';
@@ -688,6 +688,24 @@
     var pkg=b.dataset.rollPkg, eco=b.dataset.rollEco, fromV=b.dataset.rollFrom;
     var ti=findTool(pkg); if(ti<0) return;
     queueTransfer(ti, fromV, "rollback"); switchTab("transfers");
+  });
+  function histMenu(hi, x, y){
+    var h=history[hi]; if(!h) return;
+    var canRoll = h.action!=="rollback" && h.from && h.eco!=="brew";
+    var ti=findTool(h.pkg);
+    openPopup([
+      {label: canRoll?("Roll back to "+h.from):"Roll back", disabled:function(){ return !canRoll || ti<0; },
+        run:function(){ if(canRoll && ti>=0){ queueTransfer(ti, h.from, "rollback"); switchTab("transfers"); } }},
+      {label:"Copy entry", run:function(){ copyText(h.pkg+" "+h.action+" "+(h.from||"-")+" -> "+h.to); }},
+      {sep:true},
+      {label:"Jump to tool in library", disabled:function(){ return ti<0; },
+        run:function(){ if(ti>=0){ selected=ti; switchTab("library"); renderRows(); } }}
+    ], x, y);
+  }
+  histWrap.addEventListener("contextmenu",function(e){
+    var tr=e.target.closest("tr[data-i]"); if(!tr) return;
+    e.preventDefault();
+    histMenu(+tr.dataset.i, e.clientX, e.clientY);
   });
   var opSeq=0;
   function queueTransfer(ti,target,action){
@@ -704,6 +722,22 @@
     if(!inv){ x.done=true; x.ok=false; x.lines.push({stream:"stderr",line:"(not running in napm)"}); renderXfers(); return; }
     inv("run_op",{opId:opId,eco:t.eco,pkg:t.pkg,from:from,to:target,action:action});
   }
+
+  function xferMenu(xi, x, y){
+    var t=xfers[xi]; if(!t) return;
+    openPopup([
+      {label:"Copy log output", disabled:function(){ return !t.lines.length; },
+        run:function(){ copyText(t.lines.map(function(l){return l.line;}).join("\n")); }},
+      {label:"Copy command", run:function(){ copyText(t.cmd); }},
+      {sep:true},
+      {label:"Re-run", run:function(){ queueTransfer(t.ti, t.to, t.action); }}
+    ], x, y);
+  }
+  xferListEl.addEventListener("contextmenu",function(e){
+    var d=e.target.closest(".xfer-row[data-i]"); if(!d) return;
+    e.preventDefault();
+    xferMenu(+d.dataset.i, e.clientX, e.clientY);
+  });
 
   // ---- EVENTS / TABS / DRAG / SPLASH ------------------------------------
   document.getElementById("searchBtn").addEventListener("click",function(){ runSearch(document.getElementById("search").value.trim()); });
