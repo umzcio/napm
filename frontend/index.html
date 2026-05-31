@@ -45,6 +45,15 @@
   .menubar span{padding:2px 7px; cursor:default;}
   .menubar span:hover{background:var(--navy); color:#fff;}
   .menubar u{text-decoration:underline;}
+  .menubar span.open{background:var(--navy); color:#fff;}
+  .menu-pop{position:absolute; z-index:50; background:var(--face); border:1px solid var(--ddgray);
+    box-shadow:1px 1px 0 #000; padding:2px; font-size:12px; min-width:180px;}
+  .menu-pop .mi{display:flex; align-items:center; gap:6px; padding:3px 18px 3px 8px; cursor:default; white-space:nowrap;}
+  .menu-pop .mi:hover{background:var(--navy); color:#fff;}
+  .menu-pop .mi.disabled{color:var(--dgray);}
+  .menu-pop .mi.disabled:hover{background:transparent; color:var(--dgray);}
+  .menu-pop .mark{width:12px; text-align:center;}
+  .menu-pop .sep{height:0; border-top:1px solid var(--dgray); margin:3px 1px;}
 
   .toolbar{display:flex; align-items:center; gap:5px; padding:4px 5px;
     border-top:1px solid var(--white); border-bottom:1px solid var(--dgray); flex:0 0 auto;}
@@ -193,10 +202,10 @@
     <span class="tb-btn" id="tb-min" title="Minimize">_</span><span class="tb-btn" id="tb-max" title="Maximize">▢</span><span class="tb-btn" id="tb-close" title="Close">✕</span>
   </div>
 
-  <div class="menubar">
-    <span><u>F</u>ile</span><span><u>E</u>dit</span><span><u>V</u>iew</span>
-    <span><u>S</u>warm</span><span><u>H</u>elp</span>
+  <div class="menubar" id="menubar">
+    <span data-menu="file"><u>F</u>ile</span><span data-menu="edit"><u>E</u>dit</span><span data-menu="view"><u>V</u>iew</span><span data-menu="swarm"><u>S</u>warm</span><span data-menu="help"><u>H</u>elp</span>
   </div>
+  <div class="menu-pop" id="menuPop" style="display:none"></div>
 
   <div class="toolbar">
     <label>🔍</label>
@@ -700,6 +709,77 @@
   // era's beta titlebars. Pulled live from Tauri (Cargo.toml / tauri.conf.json),
   // so it never drifts from what shipped. In a plain browser preview the Tauri
   // app bridge is absent, so the version simply stays blank.
+  // ---- MENU BAR ----------------------------------------------------------
+  function inv(){ return window.__TAURI__&&window.__TAURI__.core&&window.__TAURI__.core.invoke; }
+  function copyText(s){
+    if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(s).catch(function(){fallbackCopy(s);}); }
+    else fallbackCopy(s);
+  }
+  function fallbackCopy(s){ var ta=document.createElement("textarea"); ta.value=s; document.body.appendChild(ta); ta.select(); try{document.execCommand("copy");}catch(e){} document.body.removeChild(ta); }
+  function quitApp(){ try{ window.__TAURI__.window.getCurrentWindow().close(); }catch(e){} }
+  function copyToolDetails(){
+    if(selected==null || !TOOLS[selected]) return;
+    var t=TOOLS[selected];
+    copyText([t.name+" ("+t.eco+")", "package: "+t.pkg, "installed: "+(t.installed||"-"),
+      "latest: "+t.latest, "publisher: @"+(t.publisher||"unknown"), "size: "+(t.size||"-")].join("\n"));
+  }
+  var MENUS = {
+    file: [
+      {label:"Rescan now", run:function(){ scanLibrary(); }},
+      {label:"Open data folder", run:function(){ var i=inv(); if(i) i("open_data_dir"); }},
+      {sep:true},
+      {label:"Quit", run:quitApp}
+    ],
+    edit: [
+      {label:"Copy tool details", disabled:function(){ return selected==null; }, run:copyToolDetails}
+    ],
+    swarm: [
+      {label:"Refresh registry caches", run:function(){ var i=inv(); if(i) i("clear_caches"); }}
+    ],
+    help: [
+      {label:"About napm", run:function(){ if(window.showAbout) showAbout(); }},
+      {label:"Repo on GitHub", run:function(){ var i=inv(); if(i) i("open_external",{url:"https://github.com/umzcio/napm"}); }}
+    ]
+  };
+  var openMenuName=null;
+  function closeMenu(){
+    openMenuName=null;
+    document.getElementById("menuPop").style.display="none";
+    document.querySelectorAll("#menubar span").forEach(function(s){ s.classList.remove("open"); });
+  }
+  function renderMenu(name, anchor){
+    var items=MENUS[name]; if(!items) return;
+    var pop=document.getElementById("menuPop");
+    pop.innerHTML=items.map(function(it,idx){
+      if(it.sep) return '<div class="sep"></div>';
+      var dis = it.disabled && it.disabled();
+      var mark = it.checked&&it.checked() ? "✓" : it.dot&&it.dot() ? "•" : "";
+      return '<div class="mi'+(dis?" disabled":"")+'" data-idx="'+idx+'"><span class="mark">'+mark+'</span>'+esc(it.label)+'</div>';
+    }).join("");
+    var r=anchor.getBoundingClientRect();
+    pop.style.left=r.left+"px"; pop.style.top=r.bottom+"px"; pop.style.display="block";
+    openMenuName=name;
+    document.querySelectorAll("#menubar span").forEach(function(s){ s.classList.toggle("open", s.dataset.menu===name); });
+  }
+  document.getElementById("menubar").addEventListener("click",function(e){
+    var s=e.target.closest("[data-menu]"); if(!s) return;
+    if(openMenuName===s.dataset.menu) closeMenu(); else renderMenu(s.dataset.menu, s);
+  });
+  document.getElementById("menubar").addEventListener("mouseover",function(e){
+    var s=e.target.closest("[data-menu]"); if(!s||openMenuName==null||openMenuName===s.dataset.menu) return;
+    renderMenu(s.dataset.menu, s); // hover-switch while a menu is open
+  });
+  document.getElementById("menuPop").addEventListener("click",function(e){
+    var mi=e.target.closest(".mi"); if(!mi||mi.classList.contains("disabled")) return;
+    var it=MENUS[openMenuName][+mi.dataset.idx];
+    closeMenu();
+    if(it && it.run) it.run();
+  });
+  document.addEventListener("click",function(e){
+    if(openMenuName!=null && !e.target.closest("#menubar") && !e.target.closest("#menuPop")) closeMenu();
+  });
+  document.addEventListener("keydown",function(e){ if(e.key==="Escape") closeMenu(); });
+
   function setAppVersion(){
     var app=window.__TAURI__&&window.__TAURI__.app;
     if(!app||!app.getVersion) return;
