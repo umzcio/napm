@@ -1,10 +1,10 @@
 [package]
 name = "app"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
-license = ""
-repository = ""
+description = "napm: a desktop package manager for command-line dev tools"
+authors = ["umzcio <umzcio@users.noreply.github.com>"]
+license = "MIT"
+repository = "https://github.com/umzcio/napm"
 edition = "2021"
 rust-version = "1.77.2"
 
