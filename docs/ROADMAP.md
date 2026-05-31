@@ -28,42 +28,29 @@ function** (no decorative jokes).
   persists in localStorage.
 - **Branding.** npstr cat-box logo as app icon, titlebar, and splash. No
   decorative emoji. House-style README, MIT license, scrubbed git history (public
-  repo at github.com/umzcio/napm, not yet pushed).
+  repo at github.com/umzcio, not yet pushed).
+- **M3 - Transfers (real execution + history).** The Get / Update All / rollback
+  buttons run real package commands. `run_op` streams live stdout/stderr into the
+  active transfer row and reports the honest exit code, no fake progress bar.
+  Every install/update/rollback is logged to a persistent JSON history store
+  (app-data dir) with timestamp and from/to, surviving restarts. Rollback works
+  for npm (`npm i -g pkg@ver`) and pip (`pip install pkg==ver`); brew is gated
+  honestly (no old bottles); npx offers Promote to global. Pins are real
+  (persisted, excluded from Update All).
+- **M4 - Search the swarm (registry discovery).** The Search tab runs live
+  federated queries across npm + brew + pip, replacing the seeded demo data.
+  One "Find It!" search hits the whole swarm at once; results merge into one flat
+  list sorted by weekly downloads (the trust signal), flame marker on the
+  heavily-shared ones. Source chips (all / npm / brew / pip) default to all and
+  narrow the view client-side, mapping to Napster's optional filter dropdowns.
+  npm uses the registry search + downloads API; brew searches a cached formula
+  catalog joined with 30-day analytics; pip is exact-name PyPI lookup only,
+  tagged "exact match" so the gap is visible. Each source fails independently so
+  one dead registry never blanks the grid. Installing from a result runs the same
+  M3 Transfers path. New `src-tauri/src/search/` module (blocking `ureq` behind a
+  single `http.rs`), one `search_registry` command.
 
-## Next: M3 - Transfers (real execution + history)
-
-The pane where versions actually change. Makes the Get / Update All buttons real.
-
-- Run the real install/update/rollback commands; stream stdout/stderr live into
-  the active transfer row; show the honest exit code (success/failure), not a
-  fake progress bar.
-- **Persistent history store** (SQLite or JSON in the app-data dir): log every
-  install/update/rollback with timestamp and from/to, surviving restarts. This
-  is what answers "claude-code started misbehaving - what changed and when."
-- **Rollback**: npm (`npm i -g pkg@ver`) and pip (`pip install pkg==ver`) work;
-  brew is gated honestly (no old bottles); npx offers Promote to global.
-- Makes **pins** real (persisted, actually exclude from Update All) and Update
-  All actually execute the safe+unpinned set chosen by the appetite dial.
-- The shared `run()` helper will need to surface stderr and exit codes (M2 only
-  read stdout).
-
-## M4 - Search the swarm (registry discovery)
-
-Find and install tools you do NOT have yet (Library tracks what you have; Search
-discovers what you don't).
-
-- Federated across npm + brew by default, with source-filter chips. Sorted by
-  weekly downloads (the trust signal), flame marker on heavily-shared packages.
-- npm: registry search + downloads API. brew: cached full formula catalog,
-  searched in process. pip: exact-name lookup only (PyPI has no search API),
-  labeled honestly.
-- Installing from a result runs the same install path as Transfers.
-- **Note:** the Search tab currently shows leftover seeded demo data - a live
-  violation of the "everything real" rule. Either wire it in M4 or show a
-  "not wired yet" state sooner.
-- Brings the network + caching layer that also enables npx "latest" freshness.
-
-## M5 - What's New (the decision feed)
+## Next: M5 - What's New (the decision feed)
 
 One card per available update: should you take it, and why.
 
