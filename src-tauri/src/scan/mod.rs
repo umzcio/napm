@@ -65,6 +65,11 @@ pub fn scan_all(pins: &std::collections::BTreeSet<String>, sources: Sources) -> 
     if sources.brew { all.extend(brew::scan_brew()); }
     if sources.pip { all.extend(pip::scan_pip()); }
     if sources.npx { all.extend(npx::scan_npx()); }
+    if sources.manual {
+        let other_names: std::collections::BTreeSet<String> =
+            all.iter().map(|t| t.name.clone()).collect();
+        all.extend(manual::scan_manual(&other_names));
+    }
     for row in all.iter_mut() {
         row.pinned = pins.contains(&row.pkg);
     }
