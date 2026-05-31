@@ -11,5 +11,10 @@ napm.sqlite
 /target
 /src-tauri/target
 
+# Signing / notarization / updater secrets (M10b) - never commit these
+scripts/.notary-config.local
+*.p8
+*.key
+
 # Original project archive (unpacked into the tree)
 napm.zip
