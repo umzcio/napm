@@ -373,7 +373,7 @@
         '<td class="user">'+esc(p.version)+'</td>'+
         '<td class="dl">'+fmtDl(p.weeklyDownloads)+'</td>'+
         '<td><span class="src '+p.eco+'">'+p.eco+'</span></td>'+
-        '<td class="muted">'+(p.size||"&#8212;")+'</td>'+
+        '<td class="muted">'+(p.size||"—")+'</td>'+
         '<td>'+act+'</td></tr>';
     }).join("");
     resEl.innerHTML='<table><thead><tr><th></th><th>Package</th><th>Version</th><th>Downloads/wk</th><th>Source</th><th>Size</th><th></th></tr></thead><tbody>'+body+'</tbody></table>';
