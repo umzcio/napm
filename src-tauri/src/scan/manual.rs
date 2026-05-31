@@ -30,6 +30,18 @@ pub fn first_version(s: &str) -> Option<String> {
     None
 }
 
+/// Collapse rows sharing a resolved target path (stored in `description`),
+/// keeping the first seen. Sorted by display name for stable output.
+pub fn dedup_by_target(rows: Vec<InstalledTool>) -> Vec<InstalledTool> {
+    let mut map: BTreeMap<String, InstalledTool> = BTreeMap::new();
+    for row in rows {
+        map.entry(row.description.clone()).or_insert(row);
+    }
+    let mut out: Vec<InstalledTool> = map.into_values().collect();
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}
+
 /// True when `real` (a fully-resolved path) belongs to something napm must not
 /// claim as a manual install: an app bundle, any managed root prefix, or a
 /// basename already returned by the npm/brew/pip/npx scans.
@@ -51,6 +63,34 @@ pub fn is_managed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn manual_row(name: &str, target: &str, ver: &str) -> InstalledTool {
+        InstalledTool {
+            name: name.to_string(),
+            eco: "manual".to_string(),
+            pkg: name.to_string(),
+            installed: Some(ver.to_string()),
+            latest: ver.to_string(),
+            size: String::new(),
+            pinned: false,
+            publisher: "local".to_string(),
+            description: target.to_string(),
+            updated: 0,
+            requested: true,
+        }
+    }
+
+    #[test]
+    fn dedup_collapses_same_target() {
+        let rows = dedup_by_target(vec![
+            manual_row("grok", "/Users/x/.grok/downloads/grok-0.2.14", "0.2.14"),
+            manual_row("grok", "/Users/x/.grok/downloads/grok-0.2.14", "0.2.14"),
+            manual_row("agent", "/Users/x/.grok/downloads/agent-bin", "0.2.14"),
+        ]);
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().any(|r| r.name == "grok"));
+        assert!(rows.iter().any(|r| r.name == "agent"));
+    }
 
     #[test]
     fn excludes_managed_paths_and_known_names() {
