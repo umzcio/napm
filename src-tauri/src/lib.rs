@@ -72,6 +72,16 @@ pub fn run() {
             .build(),
         )?;
       }
+      // Warm the brew catalog in the background so the first search is not cold.
+      // Best-effort: never block startup on the network.
+      let dir = app
+        .path()
+        .app_data_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+      std::thread::spawn(move || {
+        let _ = std::fs::create_dir_all(&dir);
+        search::brew::warm_brew(&dir);
+      });
       Ok(())
     })
     .run(tauri::generate_context!())
