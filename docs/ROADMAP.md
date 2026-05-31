@@ -153,7 +153,18 @@ A persisted settings store, a Win98 Preferences dialog, and Export library.
 Deferred: a real "Save As..." picker (needs the Tauri dialog plugin), Keyboard
 Shortcuts, and Alt+letter mnemonics. Appetite remains owned by the dial.
 
-## Next: M8 - Right-click context menus (throughout)
+## Done: M8 - Right-click context menus (throughout)
+
+Shipped: the M6 menu engine generalized into a cursor-positioned `openPopup`, and
+four context menus (library, search, transfers, history) routing through existing
+actions. Library: update/install, history-driven rollback (brew-gated), pin,
+copy name/install-command, open registry page (npmjs/brew/pypi via
+`open_external`), jump to What's New. Search: get, copies, open page, filter to
+source. Transfers: copy log/command, re-run (re-resolves the tool by package).
+History: rollback, copy entry, jump to tool. Registry page used instead of a
+homepage field (no backend change).
+
+Original design notes below.
 
 Right-click anywhere meaningful and get a Win98-style beveled context menu of
 the actions that apply to whatever was clicked. This is deeply period-accurate
@@ -185,7 +196,7 @@ the M3 Transfers path, pins via `set_pin`, etc.); "Open ..." links use the
 `open_external` command with the homepage/repo from the scanned metadata. No
 shell logic in the frontend.
 
-## M9 - Manual / standalone installs (best-effort source)
+## Next: M9 - Manual / standalone installs (best-effort source)
 
 A fifth source for tools installed outside any package manager - the ones
 dropped by `curl | bash` install scripts or direct downloads. Examples on the
