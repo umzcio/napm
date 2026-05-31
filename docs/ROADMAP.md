@@ -100,9 +100,18 @@ today (most library rows are brew dependencies the user never chose).
 
 ## M7 - Packaging
 
-A real signed/bundled macOS `.app` for daily use. Fix the bundle identifier
-(currently `com.tauri.dev` -> `com.napm.app`). Resolve the npm/brew PATH for
-Finder-launched apps (dev inherits the terminal PATH; a bundled app may not).
+A real signed/bundled macOS `.app` for daily use.
+
+- Fix the bundle identifier (currently `com.tauri.dev` -> `com.napm.app`).
+- Resolve the npm/brew PATH for Finder-launched apps (dev inherits the terminal
+  PATH; a bundled app may not).
+- Set the real shipping version in `tauri.conf.json` / `Cargo.toml`. The titlebar
+  wordmark now reads it live (`napm v<version>`), so packaging is the single place
+  that version is set and it flows everywhere.
+- The npstr logo icon (`icons/icon.icns`, already generated and configured) only
+  embeds in a packaged `.app`. In `tauri dev` the unbundled binary has no icon, so
+  the Dock, Finder, and the About panel show a generic placeholder. Verify the
+  packaged build shows the npstr logo in all three.
 
 ## M8 - Manual / standalone installs (best-effort source)
 
