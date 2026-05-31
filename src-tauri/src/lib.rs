@@ -167,6 +167,9 @@ fn clear_caches(app: tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+  // Capture the real login-shell PATH before anything spawns, so a Dock/Finder
+  // launch can find npm/brew/pip and the manual scanner can walk a real $PATH.
+  pathenv::fix_path();
   tauri::Builder::default()
     .invoke_handler(tauri::generate_handler![scan_installed, set_pin, get_history, run_op, search_registry, get_whats_new, get_changelog, get_advisory, open_data_dir, open_external, clear_caches, get_settings, set_settings, export_library, reveal_in_finder])
     .setup(|app| {
@@ -183,6 +186,10 @@ pub fn run() {
         .path()
         .app_data_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."));
+      // One-time migration from the pre-rename app-data dir (com.tauri.dev).
+      if let Some(parent) = dir.parent() {
+        store::migrate_legacy(&dir, &parent.join("com.tauri.dev"));
+      }
       std::thread::spawn(move || {
         let _ = std::fs::create_dir_all(&dir);
         search::brew::warm_brew(&dir);
