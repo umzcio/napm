@@ -13,7 +13,7 @@
     --white:#fff; --dgray:#808080; --ddgray:#404040; --lgray:#dfdfdf;
     --teal:#3a8a8a; --green:#00880c; --amber:#b07d00; --red:#aa0000;
     --sel:#000080; --face:#c0c0c0;
-    --npm:#cb3837; --brew:#d07000; --pip:#2f6690; --npx:#6f42c1;
+    --npm:#cb3837; --brew:#d07000; --pip:#2f6690; --npx:#6f42c1; --manual:#7a7a7a;
     --ui:"Tahoma","Geneva",sans-serif; --mono:"VT323",monospace;
   }
   *{box-sizing:border-box;}
@@ -92,9 +92,9 @@
   tbody tr.sel .muted{color:#cfcfe8;}
   .muted{color:var(--dgray);}
   .glyph{font-family:var(--mono); font-size:16px; width:18px; text-align:center;}
-  .g-up{color:var(--amber);} .g-ok{color:var(--green);} .g-off{color:var(--dgray);}
+  .g-up{color:var(--amber);} .g-ok{color:var(--green);} .g-off{color:var(--dgray);} .g-man{color:var(--dgray);}
   .g-safe{color:var(--green);} .g-hold{color:var(--amber);}
-  tr.sel .g-up,tr.sel .g-ok,tr.sel .g-off,tr.sel .g-safe,tr.sel .g-hold{color:#fff;}
+  tr.sel .g-up,tr.sel .g-ok,tr.sel .g-off,tr.sel .g-safe,tr.sel .g-hold,tr.sel .g-man{color:#fff;}
   .user{font-family:var(--mono); font-size:15px;}
   .vernew{font-weight:bold; color:var(--green);}
   .verhold{font-weight:bold; color:var(--amber);}
@@ -107,7 +107,7 @@
   /* source pills */
   .src{font-family:var(--ui); font-size:10px; font-weight:bold; color:#fff;
     padding:1px 6px; border-radius:2px;}
-  .src.npm{background:var(--npm);} .src.brew{background:var(--brew);} .src.pip{background:var(--pip);} .src.npx{background:var(--npx);}
+  .src.npm{background:var(--npm);} .src.brew{background:var(--brew);} .src.pip{background:var(--pip);} .src.npx{background:var(--npx);} .src.manual{background:var(--manual);}
 
   /* search results */
   .pkgcell{white-space:normal; max-width:330px;}
@@ -311,7 +311,7 @@
   // "update" only when the latest is genuinely NEWER than installed. A private or
   // scope-shadowed package can report a lower public "latest" (a downgrade); that
   // must not show as an available update.
-  function statusOf(t){ if(!t.installed) return "offline"; if(t.installed===t.latest) return "current"; return verCmp(t.latest,t.installed)<0?"current":"update"; }
+  function statusOf(t){ if(t.eco==="manual") return "unmanaged"; if(!t.installed) return "offline"; if(t.installed===t.latest) return "current"; return verCmp(t.latest,t.installed)<0?"current":"update"; }
   function ping(n){ var h=0; for(var i=0;i<n.length;i++) h=(h*31+n.charCodeAt(i))>>>0; return 8+(h%320); }
   function handleFor(n){ var h=0; for(var i=0;i<n.length;i++) h=(h*31+n.charCodeAt(i))>>>0; return HANDLES[h%HANDLES.length]; }
   function fmtDl(n){ if(n>=1e6) return (n/1e6).toFixed(n>=1e7?0:1).replace(/\.0$/,"")+"M"; if(n>=1e3) return Math.round(n/1e3)+"K"; return ""+n; }
@@ -323,7 +323,7 @@
 
   var selected=null, lastQuery="";
   var rowsEl=document.getElementById("rows");
-  var GLYPH={update:["↑","g-up"],current:["✓","g-ok"],offline:["✗","g-off"]};
+  var GLYPH={update:["↑","g-up"],current:["✓","g-ok"],offline:["✗","g-off"],unmanaged:["?","g-man"]};
 
   // ---- VIEW (library filters/sort, persisted) ----------------------------
   var VIEW = { requested:false, outdated:false, sources:{npm:true,brew:true,pip:true,npx:true}, sort:"name", desc:true };
@@ -333,7 +333,7 @@
   function toggleView(k){ VIEW[k]=!VIEW[k]; saveView(); renderRows(); }
   function toggleSource(s){ VIEW.sources[s]=!VIEW.sources[s]; saveView(); renderRows(); }
   function sizeBytes(s){ var m=/([\d.]+)\s*([KMGT]?B)?/i.exec(s||""); if(!m) return 0; var n=parseFloat(m[1])||0; var u=(m[2]||"B").toUpperCase(); var mul={B:1,KB:1e3,MB:1e6,GB:1e9,TB:1e12}[u]||1; return n*mul; }
-  function statusRank(t){ var s=statusOf(t); return s==="update"?0:s==="offline"?1:2; }
+  function statusRank(t){ var s=statusOf(t); return s==="update"?0:s==="offline"?1:s==="unmanaged"?3:2; }
 
   // ---- UPDATE APPETITE (the throttle dial) -------------------------------
   // 0 = patch only, 1 = up to minor, 2 = bleeding edge. Persisted in localStorage.
@@ -365,15 +365,16 @@
     display.forEach(function(x){
       var t=x.t, i=x.i;
       var npx = t.eco==="npx";
+      var manual = t.eco==="manual";
       var st=statusOf(t), off=st==="offline";
       var kind = (st==="update"&&!npx) ? bumpKind(t.installed,t.latest) : "none";
       var safe = st==="update" && !npx && isSafe(kind);
       var held = st==="update" && !npx && !safe;
-      var g = npx?["♪","g-off"] : st==="update" ? (safe?["↑","g-safe"]:["↑","g-hold"]) : GLYPH[st];
-      var gTitle = (st==="update"&&!npx) ? kind+" update"+(held?" - above your appetite":"") : "";
+      var g = manual?["?","g-man"] : npx?["♪","g-off"] : st==="update" ? (safe?["↑","g-safe"]:["↑","g-hold"]) : GLYPH[st];
+      var gTitle = manual?"unmanaged (no package manager owns this)" : (st==="update"&&!npx) ? kind+" update"+(held?" - above your appetite":"") : "";
       var tr=document.createElement("tr"); tr.dataset.i=i;
       if(selected===i) tr.className="sel";
-      var action = npx ? '<span class="muted">—</span>'
+      var action = (manual||npx) ? '<span class="muted">—</span>'
                  : st==="update" ? '<button class="btn rowbtn" data-get="'+i+'">Get</button>'
                  : off ? '<button class="btn rowbtn" data-get="'+i+'">Install</button>' : '<span class="muted">—</span>';
       tr.innerHTML=
@@ -381,7 +382,7 @@
         '<td>'+(t.pinned?'📌 ':'')+esc(t.name)+' <span class="src '+esc(t.eco)+'">'+esc(t.eco)+'</span>'+
           (VIEW.desc&&t.description?'<span class="toold">'+esc(t.description)+'</span>':'')+'</td>'+
         '<td class="'+(off?'muted':'')+'">'+esc(t.installed||"—")+'</td>'+
-        '<td class="'+(npx?'muted':safe?'vernew':held?'verhold':'muted')+'">'+(npx?"—":esc(t.latest))+'</td>'+
+        '<td class="'+((npx||manual)?'muted':safe?'vernew':held?'verhold':'muted')+'">'+((npx||manual)?"—":esc(t.latest))+'</td>'+
         '<td class="user'+(t.publisher?'':' muted')+'">@'+esc(t.publisher||"unknown")+'</td>'+
         '<td class="muted">'+esc(t.size)+'</td>'+
         '<td class="muted">'+ago(t.updated)+'</td>'+
