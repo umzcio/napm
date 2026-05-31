@@ -132,25 +132,28 @@ Ordering note: Packaging moved to the back (now M10) so feature work continues
 while the app stays local and fast to iterate. The signed .app comes once the
 feature set is settled.
 
-## Next: M7 - Preferences / Settings
+## Done: M7 - Preferences / Settings
 
-A persisted settings store plus a Win98 Preferences dialog, and the Export action
-the M6 File menu pointed at. Promoted ahead of packaging so feature work keeps
-moving while the app stays local.
+A persisted settings store, a Win98 Preferences dialog, and Export library.
 
-- **Settings store:** a small persisted store (JSON in the app-data dir, like
-  pins/history), read at launch.
-- **Preferences dialog** (reuse the M6 modal chrome): default appetite (the dial's
-  starting level), a GitHub token field (raises the API rate limit for changelogs
-  and the wire; today it is env-var only), and enable/disable sources
-  (npm/brew/pip/npx) so a scan can skip ecosystems you do not use.
-- **Wire the settings through:** the default appetite seeds the dial; the token is
-  passed to the intel HTTP calls; disabled sources are skipped by `scan_all` and
-  the federated search.
-- **Export library:** File -> Export (JSON / Markdown), writing the current
-  library to a file the user picks. The deferred File menu item from M6.
+- **Settings store:** `settings.json` in the app-data dir (same JSON layer as
+  pins/history), `{ githubToken, sources: {npm,brew,pip,npx} }`, defaults to empty
+  token + all sources on; corrupt or partial file reads as defaults (never drops
+  unspecified sources to off).
+- **Preferences dialog** (Edit -> Preferences..., reusing the M6 modal): a GitHub
+  token field and the four source toggles. Save persists then rescans. Appetite
+  stays on the dial (not duplicated here).
+- **Wiring:** the stored token is read by the intel HTTP calls (changelog + wire)
+  with the `GITHUB_TOKEN` env var as fallback; disabled sources are skipped by
+  `scan_all` and the federated `search_all`. Default settings reproduce prior
+  behavior exactly.
+- **Export library:** File -> Export (JSON / Markdown), written to the app-data
+  dir as `napm-library-<date>.{json,md}` and revealed in Finder.
 
-## M8 - Right-click context menus (throughout)
+Deferred: a real "Save As..." picker (needs the Tauri dialog plugin), Keyboard
+Shortcuts, and Alt+letter mnemonics. Appetite remains owned by the dial.
+
+## Next: M8 - Right-click context menus (throughout)
 
 Right-click anywhere meaningful and get a Win98-style beveled context menu of
 the actions that apply to whatever was clicked. This is deeply period-accurate
