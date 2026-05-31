@@ -4,6 +4,7 @@ use std::path::Path;
 pub mod http;
 pub mod npm;
 pub mod brew;
+pub mod pip;
 
 /// One discovered package in the swarm. Canonical SearchResult shape.
 /// Serialized camelCase so the frontend reads `weeklyDownloads`.
