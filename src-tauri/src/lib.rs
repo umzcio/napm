@@ -19,24 +19,24 @@ fn open_store(app: &tauri::AppHandle) -> Store {
     Store::new(dir)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn scan_installed(app: tauri::AppHandle) -> Vec<InstalledTool> {
     let store = open_store(&app);
     let pins = store.pins();
     scan::scan_all(&pins, store.settings().sources)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_pin(app: tauri::AppHandle, pkg: String, pinned: bool) {
     open_store(&app).set_pin(&pkg, pinned);
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_history(app: tauri::AppHandle) -> Vec<HistoryEntry> {
     open_store(&app).history()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn run_op(
     app: tauri::AppHandle,
     op_id: String,
@@ -54,7 +54,7 @@ fn run_op(
     ops::run_op(app.clone(), store, op_id, eco, pkg, from, to, action, ts);
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn search_registry(app: tauri::AppHandle, query: String) -> Vec<search::SearchResult> {
     let dir = app
         .path()
@@ -65,7 +65,7 @@ fn search_registry(app: tauri::AppHandle, query: String) -> Vec<search::SearchRe
     search::search_all(&query, &dir, sources)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_whats_new(app: tauri::AppHandle, installed: Vec<intel::ToolRef>, verdict_scope: Vec<String>) -> intel::WhatsNew {
     let dir = app.path().app_data_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let _ = std::fs::create_dir_all(&dir);
@@ -74,14 +74,14 @@ fn get_whats_new(app: tauri::AppHandle, installed: Vec<intel::ToolRef>, verdict_
     intel::whats_new(&installed, &verdict_scope, &dir, now)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_changelog(app: tauri::AppHandle, eco: String, pkg: String, version: String) -> Vec<String> {
     let dir = app.path().app_data_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let _ = std::fs::create_dir_all(&dir);
     intel::release::changelog(&eco, &pkg, &version, &dir)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_advisory(id: String) -> Option<intel::Advisory> {
     intel::osv::fetch_advisory(&id).map(|(severity, summary, fixed_version)| intel::Advisory {
         severity,
@@ -90,17 +90,17 @@ fn get_advisory(id: String) -> Option<intel::Advisory> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_settings(app: tauri::AppHandle) -> store::Settings {
     open_store(&app).settings()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_settings(app: tauri::AppHandle, settings: store::Settings) {
     open_store(&app).set_settings(&settings);
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn export_library(app: tauri::AppHandle, filename: String, content: String) {
     let dir = app.path().app_data_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let _ = std::fs::create_dir_all(&dir);
@@ -113,14 +113,14 @@ fn export_library(app: tauri::AppHandle, filename: String, content: String) {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn open_data_dir(app: tauri::AppHandle) {
     let dir = app.path().app_data_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let _ = std::fs::create_dir_all(&dir);
     let _ = std::process::Command::new("open").arg(&dir).spawn();
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn open_external(url: String) {
     // Only open secure web URLs, never arbitrary local paths or args.
     if url.starts_with("https://") {
@@ -130,7 +130,7 @@ fn open_external(url: String) {
 
 /// Reveal and select a path in Finder (`open -R`). Validates the path exists so
 /// a stale entry never shells an arbitrary string. No-op on a missing path.
-#[tauri::command]
+#[tauri::command(async)]
 fn reveal_in_finder(path: String) {
     let p = std::path::Path::new(&path);
     if p.exists() {
@@ -138,7 +138,7 @@ fn reveal_in_finder(path: String) {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn clear_caches(app: tauri::AppHandle) {
     let dir = app.path().app_data_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     for name in ["brew_catalog.json", "brew_analytics.json", "wire.json"] {
