@@ -451,7 +451,7 @@
           signals:[], fix:null, link:""});
       });
       FEED=feed; renderFeed(); renderStatus();
-    }).catch(function(){ FEED=[]; WIRE=[]; SECURITY_OK=false; renderFeed(); });
+    }).catch(function(){ FEED=[]; WIRE=[]; SECURITY_OK=false; WIRE_OK=false; renderFeed(); });
   }
   function reBlurb(v){
     if(v.recommendation==="safe") return "Settled release, no advisories. Safe to take.";
@@ -489,8 +489,8 @@
       var act = (it.rec==="malicious"&&!it.fix)
         ? '<div class="signal danger" style="margin-top:8px">No safe version published. Remove it: <code>'+esc(removeCmd(it))+'</code></div>'
         : (it.ti>=0?'<button class="btn rowbtn" style="margin-top:8px" data-getfeed="'+idx+'">'+esc(actLabel)+'</button>':'');
-      var card=document.createElement("div"); card.className="card raised";
-      card.innerHTML='<div class="card-h" data-card="'+idx+'"><span class="caret">+</span>'+
+      var card=document.createElement("div"); card.className="card raised"+(it.open?" open":"");
+      card.innerHTML='<div class="card-h" data-card="'+idx+'"><span class="caret">'+(it.open?"–":"+")+'</span>'+
         '<span class="nm">'+esc(nm)+'</span><span class="ver">'+verline+'</span>'+
         '<span class="age">'+esc(it.age)+'</span><span class="rec '+r[1]+'">'+r[0]+'</span></div>'+
         '<div class="card-b"><div>'+esc(it.blurb)+'</div>'+
@@ -507,9 +507,11 @@
     var h=e.target.closest("[data-card]");
     if(h){
       var c=h.parentElement; c.classList.toggle("open");
-      h.querySelector(".caret").textContent=c.classList.contains("open")?"\u2013":"+";
       var idx=+h.dataset.card, it=FEED[idx];
-      if(c.classList.contains("open") && it && !it.loaded){
+      var isOpen=c.classList.contains("open");
+      h.querySelector(".caret").textContent=isOpen?"\u2013":"+";
+      if(it) it.open=isOpen; // persist across the re-render after a lazy changelog load
+      if(isOpen && it && !it.loaded){
         it.loaded=true;
         var inv=window.__TAURI__&&window.__TAURI__.core&&window.__TAURI__.core.invoke;
         var ver=it.fix||(it.ti>=0?TOOLS[it.ti].latest:it.pkg);
