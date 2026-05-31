@@ -62,12 +62,43 @@ fn managed_roots() -> Vec<PathBuf> {
         }
         roots.push(home.join(".npm").join("_npx"));
     }
+    // npm global modules: a global CLI on PATH resolves into
+    // <prefix>/lib/node_modules, which `npm root -g` reports. Without this, npm
+    // and npx globals leak in as "manual" wherever the prefix is not a brew root.
+    if let Ok(out) = Command::new("npm").arg("root").arg("-g").output() {
+        let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !p.is_empty() {
+            roots.push(PathBuf::from(p));
+        }
+    }
+    // pip console-script dirs (global + user base bin), where entry-point wrapper
+    // scripts live (e.g. ~/Library/Python/3.x/bin/<script>). The pip row name is
+    // the distribution name, not the script basename, so only a path root catches these.
+    let py = super::run(
+        "python3",
+        &["-c", "import sysconfig, site; print(sysconfig.get_path('scripts')); print(site.getuserbase())"],
+    );
+    let mut py_lines = py.lines();
+    if let Some(g) = py_lines.next() {
+        let g = g.trim();
+        if !g.is_empty() {
+            roots.push(PathBuf::from(g));
+        }
+    }
+    if let Some(ub) = py_lines.next() {
+        let ub = ub.trim();
+        if !ub.is_empty() {
+            roots.push(PathBuf::from(ub).join("bin"));
+        }
+    }
     roots
 }
 
 /// Resolve a tool's version: a token in the resolved filename first (free, no
-/// execution), then `<tool> --version`/`-v`/`version` but ONLY when the binary
+/// execution), then `<tool> --version`/`version` but ONLY when the binary
 /// resolves under $HOME (never run system-wide binaries). Empty when unknown.
+/// `-v` is intentionally not probed: it commonly means "verbose" and can start
+/// a real or long-running process on an unknown binary.
 fn resolve_version(real: &Path, home: Option<&Path>) -> String {
     if let Some(name) = real.file_name().and_then(|n| n.to_str()) {
         if let Some(v) = first_version(name) {
@@ -79,7 +110,7 @@ fn resolve_version(real: &Path, home: Option<&Path>) -> String {
         None => false,
     };
     if under_home {
-        for arg in ["--version", "-v", "version"] {
+        for arg in ["--version", "version"] {
             if let Some(out) = run_with_timeout(real, arg, Duration::from_millis(2000)) {
                 if let Some(v) = first_version(&out) {
                     return v;
