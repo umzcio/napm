@@ -1,8 +1,43 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
+use std::sync::{Arc, Mutex, OnceLock};
 use serde_json::Value;
 use super::SearchResult;
+
+/// A catalog formula reduced to the fields search needs, with name and
+/// description pre-lowercased so the per-query substring match does no repeated
+/// case folding.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Formula {
+    pub name: String,
+    pub name_lc: String,
+    pub desc: String,
+    pub desc_lc: String,
+    pub version: String,
+}
+
+/// Parse the brew `formula.json` catalog into the lightweight Formula form.
+pub fn parse_catalog(json: &str) -> Vec<Formula> {
+    let v: Value = match serde_json::from_str(json) { Ok(v) => v, Err(_) => return Vec::new() };
+    let arr = match v.as_array() { Some(a) => a, None => return Vec::new() };
+    let mut out = Vec::with_capacity(arr.len());
+    for f in arr {
+        let name = f.get("name").and_then(|x| x.as_str()).unwrap_or("");
+        if name.is_empty() { continue; }
+        let desc = f.get("desc").and_then(|x| x.as_str()).unwrap_or("").trim();
+        let version = f.get("versions").and_then(|x| x.get("stable"))
+            .and_then(|x| x.as_str()).unwrap_or("").to_string();
+        out.push(Formula {
+            name: name.to_string(),
+            name_lc: name.to_lowercase(),
+            desc: desc.to_string(),
+            desc_lc: desc.to_lowercase(),
+            version,
+        });
+    }
+    out
+}
 
 /// formula name -> 30-day install count. The API gives `count` as a
 /// comma-grouped string ("1,234,567"), so strip commas before parsing.
@@ -25,26 +60,19 @@ pub fn parse_analytics(json: &str) -> BTreeMap<String, u64> {
     map
 }
 
-/// Search the cached brew catalog in-process. Case-insensitive substring on
-/// name or description. weekly_downloads is the 30-day analytics count divided
-/// to a rough weekly figure (labeled approximate in the UI).
-pub fn search_catalog(catalog_json: &str, query: &str, analytics: &BTreeMap<String, u64>) -> Vec<SearchResult> {
-    let v: Value = match serde_json::from_str(catalog_json) { Ok(v) => v, Err(_) => return Vec::new() };
-    let arr = match v.as_array() { Some(a) => a, None => return Vec::new() };
+/// Search the parsed catalog in-process. Case-insensitive substring on name or
+/// description (both already lowercased). weekly_downloads is the 30-day
+/// analytics count divided to a rough weekly figure.
+pub fn search_parsed(formulae: &[Formula], query: &str, analytics: &BTreeMap<String, u64>) -> Vec<SearchResult> {
     let q = query.to_lowercase();
     let mut out = Vec::new();
-    for f in arr {
-        let name = f.get("name").and_then(|x| x.as_str()).unwrap_or("");
-        if name.is_empty() { continue; }
-        let desc = f.get("desc").and_then(|x| x.as_str()).unwrap_or("");
-        if !name.to_lowercase().contains(&q) && !desc.to_lowercase().contains(&q) { continue; }
-        let version = f.get("versions").and_then(|x| x.get("stable"))
-            .and_then(|x| x.as_str()).unwrap_or("").to_string();
-        let weekly = analytics.get(name).copied().unwrap_or(0) / 4;
+    for f in formulae {
+        if !f.name_lc.contains(&q) && !f.desc_lc.contains(&q) { continue; }
+        let weekly = analytics.get(&f.name).copied().unwrap_or(0) / 4;
         out.push(SearchResult {
-            name: name.to_string(), eco: "brew".into(), pkg: name.to_string(),
-            version, weekly_downloads: weekly, size: String::new(),
-            description: desc.trim().to_string(),
+            name: f.name.clone(), eco: "brew".into(), pkg: f.name.clone(),
+            version: f.version.clone(), weekly_downloads: weekly,
+            size: String::new(), description: f.desc.clone(),
         });
     }
     out
@@ -83,29 +111,78 @@ fn cached_or_fetch(path: &Path, url: &str) -> Option<String> {
     }
 }
 
-/// Search brew formulae using a locally cached catalog and install analytics.
-/// The catalog and analytics files are cached for 24h in `cache_dir`.
-/// If both fetches fail and no cache exists, returns an empty list.
-pub fn search_brew(query: &str, cache_dir: &Path) -> Vec<SearchResult> {
-    let catalog_path = cache_dir.join("brew_catalog.json");
-    let analytics_path = cache_dir.join("brew_analytics.json");
+/// Parsed catalog + analytics held in memory so the multi-MB JSON is parsed
+/// once per process, not once per search. `loaded` drives the same 24h refresh
+/// as the disk cache. The inner data is Arc'd so a search clones cheaply and
+/// runs its substring scan outside the lock.
+struct CatalogCache {
+    loaded: SystemTime,
+    formulae: Arc<Vec<Formula>>,
+    analytics: Arc<BTreeMap<String, u64>>,
+}
 
-    let catalog_json = match cached_or_fetch(
-        &catalog_path,
+fn catalog_cell() -> &'static Mutex<Option<CatalogCache>> {
+    static CELL: OnceLock<Mutex<Option<CatalogCache>>> = OnceLock::new();
+    CELL.get_or_init(|| Mutex::new(None))
+}
+
+/// Load the parsed catalog and analytics, using the in-memory copy when it is
+/// under 24h old, otherwise rebuilding it from `cached_or_fetch` (which itself
+/// keeps a 24h disk cache). Returns cheap Arc clones. Returns None only when the
+/// catalog cannot be obtained at all (no memory copy, no disk copy, no network).
+fn load_catalog(cache_dir: &Path) -> Option<(Arc<Vec<Formula>>, Arc<BTreeMap<String, u64>>)> {
+    {
+        let guard = catalog_cell().lock().unwrap();
+        if let Some(c) = guard.as_ref() {
+            let fresh = SystemTime::now()
+                .duration_since(c.loaded)
+                .unwrap_or(Duration::MAX)
+                < Duration::from_secs(24 * 60 * 60);
+            if fresh && !c.formulae.is_empty() {
+                return Some((c.formulae.clone(), c.analytics.clone()));
+            }
+        }
+    }
+
+    let catalog_json = cached_or_fetch(
+        &cache_dir.join("brew_catalog.json"),
         "https://formulae.brew.sh/api/formula.json",
-    ) {
-        Some(s) => s,
-        None => return Vec::new(),
-    };
-
+    )?;
     let analytics_map = cached_or_fetch(
-        &analytics_path,
+        &cache_dir.join("brew_analytics.json"),
         "https://formulae.brew.sh/api/analytics/install/30d.json",
     )
     .map(|s| parse_analytics(&s))
     .unwrap_or_default();
 
-    search_catalog(&catalog_json, query, &analytics_map)
+    let formulae = Arc::new(parse_catalog(&catalog_json));
+    let analytics = Arc::new(analytics_map);
+
+    let mut guard = catalog_cell().lock().unwrap();
+    *guard = Some(CatalogCache {
+        loaded: SystemTime::now(),
+        formulae: formulae.clone(),
+        analytics: analytics.clone(),
+    });
+    Some((formulae, analytics))
+}
+
+/// Load and cache the brew catalog without searching. Called in a background
+/// thread at launch so the first user search is warm. Best-effort: errors are
+/// swallowed by the caller.
+pub fn warm_brew(cache_dir: &Path) {
+    let _ = load_catalog(cache_dir);
+}
+
+/// Search brew formulae using the in-memory parsed catalog (backed by a 24h
+/// disk cache and analytics). If the catalog cannot be obtained at all, returns
+/// an empty list so brew is simply absent rather than an error.
+pub fn search_brew(query: &str, cache_dir: &Path) -> Vec<SearchResult> {
+    let (formulae, analytics) = match load_catalog(cache_dir) {
+        Some(pair) => pair,
+        None => return Vec::new(),
+    };
+    search_parsed(&formulae, query, &analytics)
 }
 
 #[cfg(test)]
@@ -124,20 +201,34 @@ mod tests {
     }
 
     #[test]
-    fn substring_match_on_name_or_desc_with_weekly_from_analytics() {
+    fn parse_catalog_reduces_and_lowercases() {
         let catalog = r#"[
+            {"name":"RipGrep","desc":"Recursive Search","versions":{"stable":"14.1.1"}},
+            {"name":"","desc":"skip me","versions":{"stable":"1.0"}}
+        ]"#;
+        let f = parse_catalog(catalog);
+        assert_eq!(f.len(), 1); // empty-name entry skipped
+        assert_eq!(f[0].name, "RipGrep");
+        assert_eq!(f[0].name_lc, "ripgrep");
+        assert_eq!(f[0].desc_lc, "recursive search");
+        assert_eq!(f[0].version, "14.1.1");
+    }
+
+    #[test]
+    fn substring_match_on_name_or_desc_with_weekly_from_analytics() {
+        let formulae = parse_catalog(r#"[
             {"name":"ripgrep","desc":"Recursive search faster than grep","versions":{"stable":"14.1.1"}},
             {"name":"jq","desc":"JSON processor","versions":{"stable":"1.7.1"}}
-        ]"#;
+        ]"#);
         let mut a = BTreeMap::new();
         a.insert("ripgrep".to_string(), 4_000_000u64);
-        let hits = search_catalog(catalog, "search", &a);
+        let hits = search_parsed(&formulae, "search", &a);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].pkg, "ripgrep");
         assert_eq!(hits[0].eco, "brew");
         assert_eq!(hits[0].version, "14.1.1");
         assert_eq!(hits[0].weekly_downloads, 1_000_000); // 4M / 4
         // matches description too:
-        assert_eq!(search_catalog(catalog, "json", &a).len(), 1);
+        assert_eq!(search_parsed(&formulae, "json", &a).len(), 1);
     }
 }
