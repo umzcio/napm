@@ -311,6 +311,16 @@
   var rowsEl=document.getElementById("rows");
   var GLYPH={update:["↑","g-up"],current:["✓","g-ok"],offline:["✗","g-off"]};
 
+  // ---- VIEW (library filters/sort, persisted) ----------------------------
+  var VIEW = { requested:false, outdated:false, sources:{npm:true,brew:true,pip:true,npx:true}, sort:"name", desc:true };
+  try{ var sv=JSON.parse(localStorage.getItem("napm.view")); if(sv){ VIEW=Object.assign(VIEW, sv); VIEW.sources=Object.assign({npm:true,brew:true,pip:true,npx:true}, sv.sources||{}); } }catch(e){}
+  function saveView(){ try{ localStorage.setItem("napm.view", JSON.stringify(VIEW)); }catch(e){} }
+  function setSort(k){ VIEW.sort=k; saveView(); renderRows(); }
+  function toggleView(k){ VIEW[k]=!VIEW[k]; saveView(); renderRows(); }
+  function toggleSource(s){ VIEW.sources[s]=!VIEW.sources[s]; saveView(); renderRows(); }
+  function sizeBytes(s){ var m=/([\d.]+)\s*([KMGT]?B)?/i.exec(s||""); if(!m) return 0; var n=parseFloat(m[1])||0; var u=(m[2]||"B").toUpperCase(); var mul={B:1,KB:1e3,MB:1e6,GB:1e9,TB:1e12}[u]||1; return n*mul; }
+  function statusRank(t){ var s=statusOf(t); return s==="update"?0:s==="offline"?1:2; }
+
   // ---- UPDATE APPETITE (the throttle dial) -------------------------------
   // 0 = patch only, 1 = up to minor, 2 = bleeding edge. Persisted in localStorage.
   var APPETITE = 1;
@@ -324,27 +334,41 @@
   // ---- LIBRARY -----------------------------------------------------------
   function renderRows(){
     rowsEl.innerHTML="";
-    TOOLS.forEach(function(t,i){
+    var display=TOOLS.map(function(t,i){return {t:t,i:i};}).filter(function(x){
+      var t=x.t;
+      if(VIEW.requested && t.requested===false) return false;
+      if(VIEW.outdated && statusOf(t)!=="update") return false;
+      if(!VIEW.sources[t.eco]) return false;
+      return true;
+    });
+    display.sort(function(a,b){
+      if(VIEW.sort==="size") return sizeBytes(b.t.size)-sizeBytes(a.t.size);
+      if(VIEW.sort==="updated") return (b.t.updated||0)-(a.t.updated||0);
+      if(VIEW.sort==="status") return statusRank(a.t)-statusRank(b.t) || a.t.name.localeCompare(b.t.name);
+      return a.t.name.localeCompare(b.t.name);
+    });
+    display.forEach(function(x){
+      var t=x.t, i=x.i;
       var npx = t.eco==="npx";
       var st=statusOf(t), off=st==="offline";
       var kind = (st==="update"&&!npx) ? bumpKind(t.installed,t.latest) : "none";
       var safe = st==="update" && !npx && isSafe(kind);
       var held = st==="update" && !npx && !safe;
       var g = npx?["♪","g-off"] : st==="update" ? (safe?["↑","g-safe"]:["↑","g-hold"]) : GLYPH[st];
-      var gTitle = (st==="update"&&!npx) ? kind+" update"+(held?" — above your appetite":"") : "";
+      var gTitle = (st==="update"&&!npx) ? kind+" update"+(held?" - above your appetite":"") : "";
       var tr=document.createElement("tr"); tr.dataset.i=i;
       if(selected===i) tr.className="sel";
       var action = npx ? '<span class="muted">—</span>'
                  : st==="update" ? '<button class="btn rowbtn" data-get="'+i+'">Get</button>'
                  : off ? '<button class="btn rowbtn" data-get="'+i+'">Install</button>' : '<span class="muted">—</span>';
       tr.innerHTML=
-        '<td class="glyph '+g[1]+'"'+(gTitle?' title="'+gTitle+'"':'')+'>'+g[0]+'</td>'+
+        '<td class="glyph '+g[1]+'"'+(gTitle?' title="'+esc(gTitle)+'"':'')+'>'+g[0]+'</td>'+
         '<td>'+(t.pinned?'📌 ':'')+esc(t.name)+' <span class="src '+esc(t.eco)+'">'+esc(t.eco)+'</span>'+
-          (t.description?'<span class="toold">'+esc(t.description)+'</span>':'')+'</td>'+
-        '<td class="'+(off?'muted':'')+'">'+(t.installed||"—")+'</td>'+
-        '<td class="'+(npx?'muted':safe?'vernew':held?'verhold':'muted')+'">'+(npx?"—":t.latest)+'</td>'+
-        '<td class="user'+(t.publisher?'':' muted')+'">@'+(t.publisher||"unknown")+'</td>'+
-        '<td class="muted">'+t.size+'</td>'+
+          (VIEW.desc&&t.description?'<span class="toold">'+esc(t.description)+'</span>':'')+'</td>'+
+        '<td class="'+(off?'muted':'')+'">'+esc(t.installed||"—")+'</td>'+
+        '<td class="'+(npx?'muted':safe?'vernew':held?'verhold':'muted')+'">'+(npx?"—":esc(t.latest))+'</td>'+
+        '<td class="user'+(t.publisher?'':' muted')+'">@'+esc(t.publisher||"unknown")+'</td>'+
+        '<td class="muted">'+esc(t.size)+'</td>'+
         '<td class="muted">'+ago(t.updated)+'</td>'+
         '<td><span class="pin '+(t.pinned?'on':'')+'" data-pin="'+i+'" title="freeze version, skip Update All">📌</span></td>'+
         '<td>'+action+'</td>';
@@ -732,6 +756,22 @@
     ],
     edit: [
       {label:"Copy tool details", disabled:function(){ return selected==null; }, run:copyToolDetails}
+    ],
+    view: [
+      {label:"Only tools I installed", checked:function(){return VIEW.requested;}, run:function(){toggleView("requested");}},
+      {label:"Only outdated", checked:function(){return VIEW.outdated;}, run:function(){toggleView("outdated");}},
+      {sep:true},
+      {label:"Source: npm", checked:function(){return VIEW.sources.npm;}, run:function(){toggleSource("npm");}},
+      {label:"Source: brew", checked:function(){return VIEW.sources.brew;}, run:function(){toggleSource("brew");}},
+      {label:"Source: pip", checked:function(){return VIEW.sources.pip;}, run:function(){toggleSource("pip");}},
+      {label:"Source: npx", checked:function(){return VIEW.sources.npx;}, run:function(){toggleSource("npx");}},
+      {sep:true},
+      {label:"Sort by name", dot:function(){return VIEW.sort==="name";}, run:function(){setSort("name");}},
+      {label:"Sort by size", dot:function(){return VIEW.sort==="size";}, run:function(){setSort("size");}},
+      {label:"Sort by updated", dot:function(){return VIEW.sort==="updated";}, run:function(){setSort("updated");}},
+      {label:"Sort by status", dot:function(){return VIEW.sort==="status";}, run:function(){setSort("status");}},
+      {sep:true},
+      {label:"Show descriptions", checked:function(){return VIEW.desc;}, run:function(){toggleView("desc");}}
     ],
     swarm: [
       {label:"Refresh registry caches", run:function(){ var i=inv(); if(i) i("clear_caches"); }}
