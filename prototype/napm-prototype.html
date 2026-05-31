@@ -709,13 +709,13 @@
   });
   var opSeq=0;
   function queueTransfer(ti,target,action){
-    var t=TOOLS[ti], from=t.installed;
+    var t=TOOLS[ti]; if(!t) return; var from=t.installed;
     var cmd=(t.eco==="npm"?"npm i -g "+t.pkg+"@"+target
            :t.eco==="pip"?"pip install "+t.pkg+"=="+target
            :t.eco==="brew"?"brew install "+t.pkg
            :"npm i -g "+t.pkg);
     var opId="op"+(++opSeq);
-    var x={opId:opId,ti:ti,name:t.name,user:t.publisher||"unknown",cmd:cmd,lines:[],done:false,ok:false,
+    var x={opId:opId,ti:ti,pkg:t.pkg,name:t.name,user:t.publisher||"unknown",cmd:cmd,lines:[],done:false,ok:false,
            action:action,from:from,to:target};
     xfers.unshift(x); renderXfers();
     var inv=window.__TAURI__&&window.__TAURI__.core&&window.__TAURI__.core.invoke;
@@ -730,7 +730,7 @@
         run:function(){ copyText(t.lines.map(function(l){return l.line;}).join("\n")); }},
       {label:"Copy command", run:function(){ copyText(t.cmd); }},
       {sep:true},
-      {label:"Re-run", run:function(){ queueTransfer(t.ti, t.to, t.action); }}
+      {label:"Re-run", run:function(){ var i=findTool(t.pkg); if(i>=0) queueTransfer(i, t.to, t.action); }}
     ], x, y);
   }
   xferListEl.addEventListener("contextmenu",function(e){
