@@ -6,6 +6,7 @@ pub mod npm;
 pub mod brew;
 pub mod pip;
 pub mod npx;
+pub mod manual;
 pub mod publisher;
 pub mod size;
 
