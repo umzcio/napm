@@ -92,16 +92,26 @@ pub fn search_npm(query: &str) -> Vec<SearchResult> {
         }
     }
 
-    // Fetch each scoped package individually.
-    for pkg in &scoped {
-        let dl_url = format!(
-            "https://api.npmjs.org/downloads/point/last-week/{}",
-            super::http::encode(pkg)
-        );
-        if let Ok(dl_body) = super::http::get(&dl_url) {
-            for (k, v) in parse_downloads(&dl_body) {
-                dl_map.insert(k, v);
-            }
+    // Fetch each scoped package concurrently (the bulk endpoint cannot combine
+    // scoped names). The shared agent keeps connections warm across them.
+    if !scoped.is_empty() {
+        let maps: Vec<BTreeMap<String, u64>> = std::thread::scope(|s| {
+            let handles: Vec<_> = scoped.iter().map(|pkg| {
+                s.spawn(move || {
+                    let dl_url = format!(
+                        "https://api.npmjs.org/downloads/point/last-week/{}",
+                        super::http::encode(pkg)
+                    );
+                    match super::http::get(&dl_url) {
+                        Ok(dl_body) => parse_downloads(&dl_body),
+                        Err(_) => BTreeMap::new(),
+                    }
+                })
+            }).collect();
+            handles.into_iter().map(|h| h.join().unwrap_or_default()).collect()
+        });
+        for m in maps {
+            for (k, v) in m { dl_map.insert(k, v); }
         }
     }
 
