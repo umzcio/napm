@@ -71,25 +71,15 @@ fn managed_roots() -> Vec<PathBuf> {
             roots.push(PathBuf::from(p));
         }
     }
-    // pip console-script dirs (global + user base bin), where entry-point wrapper
-    // scripts live (e.g. ~/Library/Python/3.x/bin/<script>). The pip row name is
-    // the distribution name, not the script basename, so only a path root catches these.
-    let py = super::run(
-        "python3",
-        &["-c", "import sysconfig, site; print(sysconfig.get_path('scripts')); print(site.getuserbase())"],
-    );
-    let mut py_lines = py.lines();
-    if let Some(g) = py_lines.next() {
-        let g = g.trim();
-        if !g.is_empty() {
-            roots.push(PathBuf::from(g));
-        }
-    }
-    if let Some(ub) = py_lines.next() {
-        let ub = ub.trim();
-        if !ub.is_empty() {
-            roots.push(PathBuf::from(ub).join("bin"));
-        }
+    // pip user console-script dir (e.g. ~/Library/Python/3.x/bin/<script>), the
+    // macOS `pip3 install` default. The pip row name is the distribution name,
+    // not the script basename, so only a path root catches these. The GLOBAL
+    // scripts dir is intentionally NOT excluded: on macOS it is /usr/local/bin,
+    // far too broad (a common curl|bash drop target for real manual tools).
+    let user_base = super::run("python3", &["-c", "import site; print(site.getuserbase())"]);
+    let ub = user_base.trim();
+    if !ub.is_empty() {
+        roots.push(PathBuf::from(ub).join("bin"));
     }
     roots
 }
