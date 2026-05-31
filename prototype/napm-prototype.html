@@ -828,9 +828,13 @@
     closeMenu();
     if(it && it.run) it.run();
   });
-  document.addEventListener("click",function(e){
+  // Dismiss on any press outside the menu. mousedown in the capture phase is more
+  // reliable than a bubbling click: it fires before content handlers (which may
+  // rebuild the row they were clicked on) and is not swallowed by the titlebar
+  // drag region the way a plain click is.
+  document.addEventListener("mousedown",function(e){
     if(openMenuName!=null && !e.target.closest("#menubar") && !e.target.closest("#menuPop")) closeMenu();
-  });
+  }, true);
   document.addEventListener("keydown",function(e){ if(e.key==="Escape"){ if(openMenuName!=null) closeMenu(); else closeModal(); } });
 
   function closeModal(){ document.getElementById("modalBack").style.display="none"; }
