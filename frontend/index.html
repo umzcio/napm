@@ -158,6 +158,10 @@
   .signal{margin:5px 0; padding:5px 8px; background:#fff; border-left:3px solid var(--dgray);}
   .signal.warn{border-color:var(--amber);} .signal.danger{border-color:var(--red);} .signal.good{border-color:var(--green);}
   .signal .lbl{font-weight:bold;}
+  .rec.malicious{background:#a00; color:#fff;}
+  .wire{border:1px solid var(--dgray); background:#1a1a1a; color:#cfc; font-family:var(--mono); font-size:11px; margin-bottom:8px;}
+  .wire-h{background:#000; color:#9f9; padding:2px 6px; font-weight:bold;}
+  .wire-item{padding:3px 6px; border-top:1px solid #333;}
 
   .statusbar{display:flex; align-items:center; padding:3px 0 0; flex:0 0 auto;}
   .sb{padding:3px 7px; margin-right:3px; box-shadow:inset -1px -1px var(--white), inset 1px 1px var(--dgray);}
@@ -268,7 +272,15 @@
   var searchSource = "all";
 
   var FEED=[];
-  var REC={safe:["✓ Safe to take","safe"],hold:["⚠ Hold for now","hold"],security:["🛡 Update (security)","security"]};
+  var WIRE=[];
+  var SECURITY_OK=true;
+  var WIRE_OK=true;
+  var REC={
+    malicious:["☠ Compromised: act now","malicious"],
+    security:["🛡 Update (security)","security"],
+    safe:["✓ Safe to take","safe"],
+    "new":["○ New, little signal yet","new"]
+  };
   var HANDLES=["npstr_user_2001","l33t_w4rez","fast_pipe_99","t0tally_legit","dialup_dan","cd_burner","kazaa_refugee"];
 
   function statusOf(t){ if(!t.installed) return "offline"; return t.installed!==t.latest?"update":"current"; }
@@ -404,28 +416,109 @@
   }
 
   // ---- WHAT'S NEW --------------------------------------------------------
+  function verdictScope(){
+    // outdated, non-npx, unpinned, within the current appetite dial.
+    return TOOLS.filter(function(t){
+      return statusOf(t)==="update" && t.eco!=="npx" && !t.pinned && isSafe(bumpKind(t.installed,t.latest));
+    }).map(function(t){ return t.pkg; });
+  }
+  function loadWhatsNew(){
+    var inv=window.__TAURI__&&window.__TAURI__.core&&window.__TAURI__.core.invoke;
+    if(!inv){ FEED=[]; WIRE=[]; renderFeed(); return; }
+    var installed=TOOLS.filter(function(t){return t.installed;}).map(function(t){
+      return {pkg:t.pkg, eco:t.eco, installed:t.installed, latest:t.latest};
+    });
+    inv("get_whats_new",{installed:installed, verdictScope:verdictScope()}).then(function(r){
+      r=r||{};
+      SECURITY_OK = r.securityOk!==false;
+      WIRE_OK = r.wireOk!==false;
+      WIRE = r.wire||[];
+      // Build FEED items (cards) from alerts first, then verdicts.
+      var feed=[];
+      (r.alerts||[]).forEach(function(a){
+        var ti=findToolIdx(a.pkg, a.eco);
+        feed.push({ti:ti, pkg:a.pkg, eco:a.eco, rec:a.severity, age:"security advisory",
+          blurb:a.summary||"A security advisory affects your installed version.",
+          changelog:[], loaded:false,
+          signals:[{c:(a.severity==="malicious"?"danger":"warn"), lbl:a.id,
+            txt:(a.fixedVersion?("fixed in "+a.fixedVersion):"no fixed version published, consider removing")}],
+          fix:a.fixedVersion||null, link:a.link||""});
+      });
+      (r.verdicts||[]).forEach(function(v){
+        var ti=findToolIdx(v.pkg, v.eco);
+        feed.push({ti:ti, pkg:v.pkg, eco:v.eco, rec:v.recommendation==="unknown"?"new":v.recommendation,
+          age:v.ageLabel||"signal unknown", blurb:reBlurb(v), changelog:[], loaded:false,
+          signals:[], fix:null, link:""});
+      });
+      FEED=feed; renderFeed(); renderStatus();
+    }).catch(function(){ FEED=[]; WIRE=[]; SECURITY_OK=false; renderFeed(); });
+  }
+  function reBlurb(v){
+    if(v.recommendation==="safe") return "Settled release, no advisories. Safe to take.";
+    if(v.recommendation==="new") return "Fresh release with little signal yet. Your call.";
+    return "No release-age signal available for this source.";
+  }
+  function findToolIdx(pkg, eco){ for(var i=0;i<TOOLS.length;i++) if(TOOLS[i].pkg===pkg && TOOLS[i].eco===eco) return i; return -1; }
   function renderFeed(){
     var f=document.getElementById("feed"); f.innerHTML="";
-    if(!FEED.length){ f.innerHTML='<div class="empty">You\u2019re on the latest of everything.</div>'; return; }
+    // Wire strip.
+    if(WIRE.length){
+      var items=WIRE.slice(0,8).map(function(w){
+        return '<div class="wire-item"><span class="src '+esc(w.eco)+'">'+esc(w.eco)+'</span> '+
+          esc(w.summary||w.id)+(w.packages&&w.packages.length?' <span class="muted">('+esc(w.packages.slice(0,4).join(", "))+(w.packages.length>4?", \u2026":"")+')</span>':'')+'</div>';
+      }).join("");
+      f.innerHTML+='<div class="wire"><div class="wire-h">\ud83d\udce1 supply-chain wire</div>'+items+'</div>';
+    } else if(!WIRE_OK){
+      f.innerHTML+='<div class="wire"><div class="wire-h">\ud83d\udce1 supply-chain wire</div><div class="wire-item muted">wire unavailable</div></div>';
+    }
+    if(!SECURITY_OK){
+      f.innerHTML+='<div class="signal danger" style="margin:6px 0"><span class="lbl">security:</span> check unavailable: could not reach the advisory database, so this is not an all-clear.</div>';
+    }
+    if(!FEED.length){
+      f.innerHTML+='<div class="empty">'+(SECURITY_OK?'You\u2019re on the latest of everything, and nothing you have is flagged.':'No update verdicts to show.')+'</div>';
+      return;
+    }
     FEED.forEach(function(it,idx){
-      var t=TOOLS[it.ti], r=REC[it.rec];
-      var sig=it.signals.map(function(s){return '<div class="signal '+s.c+'"><span class="lbl">'+s.lbl+':</span> '+s.txt+'</div>';}).join("");
-      var log=it.changelog.map(function(c){return '<li>'+c+'</li>';}).join("");
+      var nm=it.ti>=0?TOOLS[it.ti].name:it.pkg;
+      var verline=it.ti>=0&&TOOLS[it.ti].installed?(esc(TOOLS[it.ti].installed)+' \u2192 '+esc(it.fix||TOOLS[it.ti].latest)):esc(it.fix||"");
+      var r=REC[it.rec]||REC["new"];
+      var sig=it.signals.map(function(s){return '<div class="signal '+s.c+'"><span class="lbl">'+esc(s.lbl)+':</span> '+esc(s.txt)+'</div>';}).join("");
+      var log=it.changelog.length?('<ul>'+it.changelog.map(function(c){return '<li>'+esc(c)+'</li>';}).join("")+'</ul>')
+        :(it.loaded?'<div class="muted">No changelog available.</div>':'<div class="muted">Expand to load changelog\u2026</div>');
+      var actLabel = it.fix?("Get "+it.fix):(it.ti>=0?("Get "+TOOLS[it.ti].latest):"Get");
+      var act = (it.rec==="malicious"&&!it.fix)
+        ? '<div class="signal danger" style="margin-top:8px">No safe version published. Remove it: <code>'+esc(removeCmd(it))+'</code></div>'
+        : (it.ti>=0?'<button class="btn rowbtn" style="margin-top:8px" data-getfeed="'+idx+'">'+esc(actLabel)+'</button>':'');
       var card=document.createElement("div"); card.className="card raised";
       card.innerHTML='<div class="card-h" data-card="'+idx+'"><span class="caret">+</span>'+
-        '<span class="nm">'+t.name+'</span><span class="ver">'+t.installed+' \u2192 '+t.latest+'</span>'+
-        '<span class="age">'+it.age+'</span><span class="rec '+r[1]+'">'+r[0]+'</span></div>'+
-        '<div class="card-b"><div>'+it.blurb+'</div>'+
-        '<div style="font-weight:bold;margin-top:6px">What changed</div><ul>'+log+'</ul>'+sig+
-        '<button class="btn rowbtn" style="margin-top:8px" data-getfeed="'+idx+'">Get '+t.latest+'</button></div>';
+        '<span class="nm">'+esc(nm)+'</span><span class="ver">'+verline+'</span>'+
+        '<span class="age">'+esc(it.age)+'</span><span class="rec '+r[1]+'">'+r[0]+'</span></div>'+
+        '<div class="card-b"><div>'+esc(it.blurb)+'</div>'+
+        '<div style="font-weight:bold;margin-top:6px">What changed</div>'+log+sig+act+'</div>';
       f.appendChild(card);
     });
   }
+  function removeCmd(it){
+    if(it.eco==="npm"||it.eco==="npx") return "npm rm -g "+it.pkg;
+    if(it.eco==="pip") return "pip uninstall "+it.pkg;
+    return "brew uninstall "+it.pkg;
+  }
   document.getElementById("feed").addEventListener("click",function(e){
     var h=e.target.closest("[data-card]");
-    if(h){ var c=h.parentElement; c.classList.toggle("open"); h.querySelector(".caret").textContent=c.classList.contains("open")?"\u2013":"+"; return; }
+    if(h){
+      var c=h.parentElement; c.classList.toggle("open");
+      h.querySelector(".caret").textContent=c.classList.contains("open")?"\u2013":"+";
+      var idx=+h.dataset.card, it=FEED[idx];
+      if(c.classList.contains("open") && it && !it.loaded){
+        it.loaded=true;
+        var inv=window.__TAURI__&&window.__TAURI__.core&&window.__TAURI__.core.invoke;
+        var ver=it.fix||(it.ti>=0?TOOLS[it.ti].latest:it.pkg);
+        if(inv){ inv("get_changelog",{eco:it.eco,pkg:it.pkg,version:ver}).then(function(log){ it.changelog=log||[]; renderFeed(); }).catch(function(){ renderFeed(); }); }
+      }
+      return;
+    }
     var g=e.target.closest("[data-getfeed]");
-    if(g){ var it=FEED[+g.dataset.getfeed]; queueTransfer(it.ti, TOOLS[it.ti].latest, "update"); switchTab("transfers"); }
+    if(g){ var it2=FEED[+g.dataset.getfeed]; if(it2 && it2.ti>=0){ queueTransfer(it2.ti, it2.fix||TOOLS[it2.ti].latest, "update"); switchTab("transfers"); } }
   });
 
   // ---- TRANSFERS ---------------------------------------------------------
@@ -510,7 +603,7 @@
     var titles={library:"Shared Library",search:"Search",whatsnew:"What's New",transfers:"Transfers"};
     document.querySelector(".titlebar .title").textContent="- npstr AI Package Manager ["+titles[name]+"]";
   }
-  document.querySelectorAll(".tab").forEach(function(t){ t.addEventListener("click",function(){ if(t.dataset.view==="search") runSearch(lastQuery); else switchTab(t.dataset.view); }); });
+  document.querySelectorAll(".tab").forEach(function(t){ t.addEventListener("click",function(){ if(t.dataset.view==="search") runSearch(lastQuery); else { if(t.dataset.view==="whatsnew") loadWhatsNew(); switchTab(t.dataset.view); } }); });
 
   // Window controls: the OS window is frameless, so the Win98 titlebar IS the
   // titlebar. Dragging is handled natively via data-tauri-drag-region; here we
@@ -534,11 +627,11 @@
 
   function scanLibrary(){
     var inv = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
-    if(!inv){ renderRows(); renderFeed(); renderStatus(); return; }
+    if(!inv){ renderRows(); loadWhatsNew(); renderStatus(); return; }
     inv("scan_installed").then(function(tools){
       TOOLS = tools || [];
-      renderRows(); renderFeed(); renderStatus();
-    }).catch(function(e){ console.error("scan_installed failed", e); renderRows(); renderFeed(); renderStatus(); });
+      renderRows(); loadWhatsNew(); renderStatus();
+    }).catch(function(e){ console.error("scan_installed failed", e); renderRows(); loadWhatsNew(); renderStatus(); });
   }
   // Update appetite dial: load saved level, label it, re-classify live on drag.
   (function(){
