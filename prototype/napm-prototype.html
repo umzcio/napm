@@ -106,8 +106,13 @@
   tr.sel .toold{color:#cfcfe8;}
   .dl{font-family:var(--mono); font-size:15px;}
   .fire{color:var(--red);}
+  .exact{font-size:10px; color:var(--dgray); border:1px solid var(--dgray); padding:0 3px;}
   .searching{padding:26px; text-align:center; color:var(--dgray); font-family:var(--mono); font-size:16px;}
   .hint{display:block; font-family:var(--ui); font-size:11px; margin-top:6px;}
+  .chips{display:flex; gap:4px; padding:4px 6px;}
+  .chip{font-family:var(--mono); font-size:12px; padding:1px 8px; border:1px solid var(--dgray);
+    background:var(--btn,var(--face)); cursor:pointer;}
+  .chip.on{background:var(--navy); color:#fff;}
 
   /* transfers */
   .section-h{background:var(--face); padding:4px 8px; font-weight:bold;
@@ -188,7 +193,7 @@
   <div class="toolbar">
     <label>🔍</label>
     <input class="search" id="search" placeholder="search the swarm for packages to download...">
-    <button class="btn primary" id="searchBtn">Search</button>
+    <button class="btn primary" id="searchBtn">Find It!</button>
     <button class="btn" id="updateAll">Update All</button>
   </div>
 
@@ -212,6 +217,12 @@
     </div>
     <!-- SEARCH -->
     <div class="view" data-view="search">
+      <div class="chips" id="srcChips">
+        <span class="chip on" data-src="all">all</span>
+        <span class="chip" data-src="npm">npm</span>
+        <span class="chip" data-src="brew">brew</span>
+        <span class="chip" data-src="pip">pip</span>
+      </div>
       <div id="searchResults"></div>
     </div>
     <!-- WHAT'S NEW -->
@@ -249,32 +260,10 @@
   // ---- INSTALLED PACKAGES (your Shared Library) --------------------------
   var TOOLS = [];
 
-  // ---- THE SWARM (registry search index) ---------------------------------
-  // Real app: npm -> registry.npmjs.org/-/v1/search, brew -> formulae.brew.sh
-  // index, pip -> a PyPI mirror (no native search API anymore).
-  var SWARM = [
-    {name:"eslint",       eco:"npm",  pkg:"eslint",                    version:"9.10.0",  dl:32000000, size:"3 MB",  desc:"Pluggable JavaScript linter"},
-    {name:"prettier",     eco:"npm",  pkg:"prettier",                  version:"3.3.3",   dl:28000000, size:"8 MB",  desc:"Opinionated code formatter"},
-    {name:"TypeScript",   eco:"npm",  pkg:"typescript",                version:"5.6.2",   dl:62000000, size:"9 MB",  desc:"Typed superset of JavaScript"},
-    {name:"vite",         eco:"npm",  pkg:"vite",                      version:"5.4.6",   dl:18000000, size:"21 MB", desc:"Next-gen frontend build tool"},
-    {name:"tsx",          eco:"npm",  pkg:"tsx",                       version:"4.19.1",  dl:6500000,  size:"14 MB", desc:"Run TypeScript directly with esbuild"},
-    {name:"nodemon",      eco:"npm",  pkg:"nodemon",                   version:"3.1.4",   dl:5200000,  size:"3 MB",  desc:"Auto-restart node on file change"},
-    {name:"npm-check-updates",eco:"npm",pkg:"npm-check-updates",       version:"17.1.1",  dl:2100000,  size:"6 MB",  desc:"Upgrade package.json dependencies"},
-    {name:"wrangler",     eco:"npm",  pkg:"wrangler",                  version:"3.78.0",  dl:900000,   size:"40 MB", desc:"Cloudflare Workers CLI"},
-    {name:"Claude Code",  eco:"npm",  pkg:"@anthropic-ai/claude-code", version:"1.4.0",   dl:1400000,  size:"38 MB", desc:"Agentic coding tool in your terminal"},
-    {name:"Codex CLI",    eco:"npm",  pkg:"@openai/codex",             version:"0.24.2",  dl:780000,   size:"31 MB", desc:"OpenAI coding agent CLI"},
-    {name:"Gemini CLI",   eco:"npm",  pkg:"@google/gemini-cli",        version:"0.9.1",   dl:610000,   size:"22 MB", desc:"Google Gemini coding agent CLI"},
-    {name:"ripgrep",      eco:"brew", pkg:"ripgrep",                   version:"14.1.1",  dl:4200000,  size:"4 MB",  desc:"Recursive search, faster than grep"},
-    {name:"fd",           eco:"brew", pkg:"fd",                        version:"10.2.0",  dl:2600000,  size:"3 MB",  desc:"Simple, fast alternative to find"},
-    {name:"bat",          eco:"brew", pkg:"bat",                       version:"0.24.0",  dl:3100000,  size:"5 MB",  desc:"cat clone with syntax highlighting"},
-    {name:"fzf",          eco:"brew", pkg:"fzf",                       version:"0.55.0",  dl:5400000,  size:"4 MB",  desc:"Command-line fuzzy finder"},
-    {name:"jq",           eco:"brew", pkg:"jq",                        version:"1.7.1",   dl:8900000,  size:"1 MB",  desc:"Command-line JSON processor"},
-    {name:"gh",           eco:"brew", pkg:"gh",                        version:"2.57.0",  dl:6100000,  size:"30 MB", desc:"GitHub on the command line"},
-    {name:"lazygit",      eco:"brew", pkg:"lazygit",                   version:"0.44.1",  dl:1900000,  size:"18 MB", desc:"Terminal UI for git"},
-    {name:"httpie",       eco:"pip",  pkg:"httpie",                    version:"3.2.2",   dl:1200000,  size:"2 MB",  desc:"Human-friendly HTTP client"},
-    {name:"ruff",         eco:"pip",  pkg:"ruff",                      version:"0.6.5",   dl:9800000,  size:"12 MB", desc:"Extremely fast Python linter"},
-    {name:"uv",           eco:"pip",  pkg:"uv",                        version:"0.4.10",  dl:7700000,  size:"15 MB", desc:"Fast Python package installer"}
-  ];
+  // ---- THE SWARM (registry search results) --------------------------------
+  // Populated by live calls to search_registry; empty until a search runs.
+  var SWARM = [];
+  var searchSource = "all";
 
   var FEED=[];
   var REC={safe:["✓ Safe to take","safe"],hold:["⚠ Hold for now","hold"],security:["🛡 Update (security)","security"]};
@@ -351,30 +340,40 @@
   var resEl=document.getElementById("searchResults");
   function runSearch(q){
     lastQuery=q; switchTab("search");
-    if(!q){ resEl.innerHTML='<div class="empty">Search the swarm for a package to download.<span class="hint">Try: <b>linter</b>, <b>http</b>, <b>fuzzy</b>, <b>claude</b>, <b>git</b></span></div>'; return; }
-    resEl.innerHTML='<div class="searching">Searching the swarm for "'+q+'" ...</div>';
-    setTimeout(function(){ renderSearchResults(); }, 600);
+    if(!q){ resEl.innerHTML='<div class="empty">Search the swarm for a package to download.<span class="hint">Try: <b>linter</b>, <b>http</b>, <b>fuzzy</b>, <b>claude</b>, <b>ripgrep</b></span></div>'; return; }
+    resEl.innerHTML='<div class="searching">Searching the swarm for "'+esc(q)+'" ...</div>';
+    var inv=window.__TAURI__&&window.__TAURI__.core&&window.__TAURI__.core.invoke;
+    if(!inv){ resEl.innerHTML='<div class="empty">The swarm is unreachable. Check your connection and try again.</div>'; return; }
+    inv("search_registry",{query:q}).then(function(results){
+      SWARM = results || [];
+      renderSearchResults();
+    }).catch(function(){
+      resEl.innerHTML='<div class="empty">The swarm is unreachable. Check your connection and try again.</div>';
+    });
   }
   function renderSearchResults(){
     var q=lastQuery.toLowerCase();
     if(!q){ runSearch(""); return; }
-    var hits=SWARM.filter(function(p){ return p.name.toLowerCase().indexOf(q)>=0 || p.pkg.toLowerCase().indexOf(q)>=0 || p.desc.toLowerCase().indexOf(q)>=0; })
-                  .sort(function(a,b){ return b.dl-a.dl; });
-    if(!hits.length){ resEl.innerHTML='<div class="empty">No peers are sharing "'+lastQuery+'". Try another term.</div>'; return; }
+    var hits=SWARM.filter(function(p){ return searchSource==="all" || p.eco===searchSource; });
+    if(!hits.length){
+      resEl.innerHTML='<div class="empty">No peers are sharing "'+esc(lastQuery)+'"'+(searchSource!=="all"?(' on '+searchSource):'')+'. Try another term.</div>';
+      return;
+    }
     var body=hits.map(function(p){
       var ti=findTool(p.pkg), inLib = ti>=0 && TOOLS[ti].installed;
       var outdated = ti>=0 && statusOf(TOOLS[ti])==="update";
-      var act = inLib && !outdated ? '<span class="g-ok">✓ in library</span>'
-              : outdated ? '<button class="btn rowbtn" data-install="'+p.pkg+'">Update</button>'
-              : '<button class="btn rowbtn" data-install="'+p.pkg+'">Get</button>';
-      var fire = p.dl>=5e6 ? ' <span class="fire" title="heavily shared">🔥</span>' : '';
+      var act = inLib && !outdated ? '<span class="g-ok">&#10003; in library</span>'
+              : outdated ? '<button class="btn rowbtn" data-install="'+esc(p.pkg)+'">Update</button>'
+              : '<button class="btn rowbtn" data-install="'+esc(p.pkg)+'">Get</button>';
+      var fire = p.weeklyDownloads>=5e6 ? ' <span class="fire" title="heavily shared">&#128293;</span>' : '';
+      var pipTag = p.eco==="pip" ? ' <span class="exact" title="pip has no search API; matched by exact name">exact match</span>' : '';
       return '<tr>'+
-        '<td class="glyph g-off">♪</td>'+
-        '<td class="pkgcell"><b>'+p.name+'</b>'+fire+' <span class="muted">'+p.pkg+'</span><span class="desc">'+p.desc+'</span></td>'+
-        '<td class="user">'+p.version+'</td>'+
-        '<td class="dl">'+fmtDl(p.dl)+'</td>'+
+        '<td class="glyph g-off">&#9834;</td>'+
+        '<td class="pkgcell"><b>'+esc(p.name)+'</b>'+fire+pipTag+' <span class="muted">'+esc(p.pkg)+'</span><span class="desc">'+esc(p.description)+'</span></td>'+
+        '<td class="user">'+esc(p.version)+'</td>'+
+        '<td class="dl">'+fmtDl(p.weeklyDownloads)+'</td>'+
         '<td><span class="src '+p.eco+'">'+p.eco+'</span></td>'+
-        '<td class="muted">'+p.size+'</td>'+
+        '<td class="muted">'+(p.size||"&#8212;")+'</td>'+
         '<td>'+act+'</td></tr>';
     }).join("");
     resEl.innerHTML='<table><thead><tr><th></th><th>Package</th><th>Version</th><th>Downloads/wk</th><th>Source</th><th>Size</th><th></th></tr></thead><tbody>'+body+'</tbody></table>';
@@ -382,6 +381,12 @@
   resEl.addEventListener("click",function(e){
     var b=e.target.closest("[data-install]"); if(!b) return;
     installPackage(b.dataset.install);
+  });
+  document.getElementById("srcChips").addEventListener("click",function(e){
+    var c=e.target.closest("[data-src]"); if(!c) return;
+    searchSource=c.dataset.src;
+    document.querySelectorAll("#srcChips .chip").forEach(function(x){ x.classList.toggle("on", x===c); });
+    renderSearchResults();
   });
   function installPackage(pkg){
     var p=null; for(var i=0;i<SWARM.length;i++) if(SWARM[i].pkg===pkg) p=SWARM[i];
@@ -391,7 +396,7 @@
       if(statusOf(TOOLS[ti])==="update"){ queueTransfer(ti, TOOLS[ti].latest, "update"); switchTab("transfers"); }
       return;
     }
-    TOOLS.push({name:p.name, eco:p.eco, pkg:p.pkg, installed:null, latest:p.version, size:p.size, user:handleFor(p.name), pinned:false});
+    TOOLS.push({name:p.name, eco:p.eco, pkg:p.pkg, installed:null, latest:p.version, size:p.size||"", publisher:"", description:p.description||"", updated:0, pinned:false});
     queueTransfer(TOOLS.length-1, p.version, "install");
     switchTab("transfers");
   }
