@@ -1,1 +1,243 @@
-// implemented in a later task
+use serde_json::Value;
+use std::path::Path;
+
+/// Convert a leading ISO 8601 datetime ("2024-05-01T12:00:00Z" or
+/// "2024-05-01...") to Unix seconds (UTC). Returns None if the date part does
+/// not parse. Seconds precision; ignores any fractional/zone suffix.
+pub fn iso_to_unix(s: &str) -> Option<i64> {
+    let b = s.as_bytes();
+    if b.len() < 10 { return None; }
+    let num = |a: usize, z: usize| s.get(a..z)?.parse::<i64>().ok();
+    let year = num(0, 4)?;
+    let month = num(5, 7)?;
+    let day = num(8, 10)?;
+    let (mut hh, mut mm, mut ss) = (0i64, 0i64, 0i64);
+    if s.len() >= 19 && b[10] == b'T' {
+        hh = num(11, 13).unwrap_or(0);
+        mm = num(14, 16).unwrap_or(0);
+        ss = num(17, 19).unwrap_or(0);
+    }
+    // days_from_civil (Howard Hinnant): days since 1970-01-01.
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = (month + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    Some(days * 86400 + hh * 3600 + mm * 60 + ss)
+}
+
+/// npm registry document -> publish unix time for `version` (from `time[version]`).
+pub fn parse_npm_time(json: &str, version: &str) -> Option<i64> {
+    let v: Value = serde_json::from_str(json).ok()?;
+    let t = v.get("time")?.get(version)?.as_str()?;
+    iso_to_unix(t)
+}
+
+/// PyPI project document -> upload unix time for `version`
+/// (`releases[version][0].upload_time_iso_8601`).
+pub fn parse_pypi_time(json: &str, version: &str) -> Option<i64> {
+    let v: Value = serde_json::from_str(json).ok()?;
+    let files = v.get("releases")?.get(version)?.as_array()?;
+    let t = files.first()?.get("upload_time_iso_8601")
+        .or_else(|| files.first()?.get("upload_time"))?.as_str()?;
+    iso_to_unix(t)
+}
+
+/// (recommendation, age_label) from a publish time and "now". Settled (>= 7 days)
+/// is "safe"; fresher is "new". A None publish time is "unknown".
+pub fn age_verdict(published: Option<i64>, now: i64) -> (String, String) {
+    let p = match published { Some(p) => p, None => return ("unknown".into(), "".into()) };
+    let days = ((now - p).max(0)) / 86400;
+    let label = if days < 1 { "released today".to_string() }
+        else if days == 1 { "released 1 day ago".to_string() }
+        else { format!("released {} days ago", days) };
+    let rec = if days >= 7 { "safe" } else { "new" };
+    (rec.to_string(), label)
+}
+
+/// Extract (owner, repo) from a GitHub URL in any common form
+/// (git+https://github.com/owner/repo.git, https://github.com/owner/repo, etc).
+pub fn github_repo_from_url(url: &str) -> Option<(String, String)> {
+    let i = url.find("github.com/")? + "github.com/".len();
+    let rest = &url[i..];
+    let mut parts = rest.split('/');
+    let owner = parts.next()?.trim();
+    let repo = parts.next()?.trim().trim_end_matches(".git");
+    // strip any trailing query/fragment/path on the repo segment
+    let repo = repo.split(['#', '?']).next().unwrap_or(repo);
+    if owner.is_empty() || repo.is_empty() { return None; }
+    Some((owner.to_string(), repo.to_string()))
+}
+
+/// Pull changelog bullet lines from a GitHub releases array for the release whose
+/// tag matches `version` (with or without a leading "v"). Returns up to 12
+/// non-empty, de-marked lines from that release body.
+pub fn parse_github_releases(json: &str, version: &str) -> Vec<String> {
+    let v: Value = match serde_json::from_str(json) { Ok(v) => v, Err(_) => return Vec::new() };
+    let arr = match v.as_array() { Some(a) => a, None => return Vec::new() };
+    let want = version.trim_start_matches('v');
+    let body = arr.iter().find_map(|rel| {
+        let tag = rel.get("tag_name").and_then(|t| t.as_str()).unwrap_or("");
+        if tag.trim_start_matches('v') == want {
+            rel.get("body").and_then(|b| b.as_str())
+        } else { None }
+    });
+    let body = match body { Some(b) => b, None => return Vec::new() };
+    body.lines()
+        .map(|l| l.trim().trim_start_matches(['#', '-', '*', ' ']).trim())
+        .filter(|l| !l.is_empty())
+        .take(12)
+        .map(String::from)
+        .collect()
+}
+
+/// (recommendation, age_label) for a package version, derived from the registry.
+/// npm/npx: GET the npm registry doc and extract the publish time.
+/// pip: GET the PyPI project doc and extract the upload time.
+/// brew: no reliable per-version publish date; returns ("unknown", "").
+pub fn release_age(eco: &str, pkg: &str, version: &str, now: i64) -> (String, String) {
+    match eco {
+        "npm" | "npx" => {
+            let url = format!("https://registry.npmjs.org/{}", crate::http::encode(pkg));
+            let published = crate::http::get(&url).ok().and_then(|body| parse_npm_time(&body, version));
+            age_verdict(published, now)
+        }
+        "pip" => {
+            let url = format!("https://pypi.org/pypi/{}/json", crate::http::encode(pkg));
+            let published = crate::http::get(&url).ok().and_then(|body| parse_pypi_time(&body, version));
+            age_verdict(published, now)
+        }
+        _ => ("unknown".into(), "".into()),
+    }
+}
+
+/// Fetch and cache the GitHub changelog for (eco, pkg, version).
+/// Cache is permanent (one write per unique version). Any failure returns
+/// Vec::new(). Caches empty results too, to avoid re-hitting a rate limit.
+pub fn changelog(eco: &str, pkg: &str, version: &str, cache_dir: &Path) -> Vec<String> {
+    // Build a filesystem-safe cache key.
+    let safe_pkg = pkg.replace(['/', '@'], "_");
+    let cache_file = cache_dir.join(format!("changelog_{}_{}_{}.json", eco, safe_pkg, version));
+
+    // Return cached result if it exists (permanent cache per version).
+    if let Ok(s) = std::fs::read_to_string(&cache_file) {
+        if let Ok(v) = serde_json::from_str::<Vec<String>>(&s) {
+            return v;
+        }
+    }
+
+    // Derive the GitHub repo URL from the registry.
+    let repo_url: Option<String> = match eco {
+        "npm" | "npx" => {
+            let url = format!("https://registry.npmjs.org/{}", crate::http::encode(pkg));
+            crate::http::get(&url).ok().and_then(|body| {
+                let v: Value = serde_json::from_str(&body).ok()?;
+                v.get("repository")?.get("url")?.as_str().map(String::from)
+            })
+        }
+        "pip" => {
+            let url = format!("https://pypi.org/pypi/{}/json", crate::http::encode(pkg));
+            crate::http::get(&url).ok().and_then(|body| {
+                let v: Value = serde_json::from_str(&body).ok()?;
+                let info = v.get("info")?;
+                // Check project_urls values first.
+                if let Some(urls) = info.get("project_urls").and_then(|u| u.as_object()) {
+                    for (_, val) in urls {
+                        if let Some(s) = val.as_str() {
+                            if s.contains("github.com") {
+                                return Some(s.to_string());
+                            }
+                        }
+                    }
+                }
+                // Fall back to home_page.
+                info.get("home_page").and_then(|h| h.as_str())
+                    .filter(|s| s.contains("github.com"))
+                    .map(String::from)
+            })
+        }
+        "brew" => {
+            let url = format!("https://formulae.brew.sh/api/formula/{}.json", crate::http::encode(pkg));
+            crate::http::get(&url).ok().and_then(|body| {
+                let v: Value = serde_json::from_str(&body).ok()?;
+                v.get("homepage")?.as_str()
+                    .filter(|s| s.contains("github.com"))
+                    .map(String::from)
+            })
+        }
+        _ => None,
+    };
+
+    let result: Vec<String> = (|| {
+        let (owner, repo) = github_repo_from_url(repo_url.as_deref()?)?;
+        let releases_url = format!(
+            "https://api.github.com/repos/{}/{}/releases?per_page=20",
+            owner, repo
+        );
+        let mut headers: Vec<(&str, &str)> = vec![("Accept", "application/vnd.github+json")];
+        // Read the token at call time; store it in a local binding so the reference lives long enough.
+        let token_str: String;
+        let token_header: String;
+        if let Ok(token) = std::env::var("GITHUB_TOKEN") {
+            token_str = token;
+            token_header = format!("Bearer {}", token_str);
+            headers.push(("Authorization", &token_header));
+        }
+        let body = crate::http::get_with_headers(&releases_url, &headers).ok()?;
+        Some(parse_github_releases(&body, version))
+    })().unwrap_or_default();
+
+    // Cache the result (even if empty) to avoid re-hitting the API.
+    if let Ok(s) = serde_json::to_string(&result) {
+        let _ = std::fs::write(&cache_file, s);
+    }
+
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn iso_parses_known_epochs() {
+        assert_eq!(iso_to_unix("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(iso_to_unix("2000-01-01T00:00:00Z"), Some(946684800));
+        assert_eq!(iso_to_unix("2024-05-01T12:00:00Z"), Some(1714564800));
+        assert_eq!(iso_to_unix("nope"), None);
+    }
+
+    #[test]
+    fn npm_and_pypi_times_and_verdict() {
+        let npm = r#"{"time":{"1.2.3":"2024-05-01T12:00:00Z","modified":"x"}}"#;
+        assert_eq!(parse_npm_time(npm, "1.2.3"), Some(1714564800));
+        let pypi = r#"{"releases":{"1.0.0":[{"upload_time_iso_8601":"2024-05-01T12:00:00Z"}]}}"#;
+        assert_eq!(parse_pypi_time(pypi, "1.0.0"), Some(1714564800));
+
+        let now = 1714564800 + 10 * 86400; // 10 days later
+        let (rec, label) = age_verdict(Some(1714564800), now);
+        assert_eq!(rec, "safe");
+        assert_eq!(label, "released 10 days ago");
+        let (rec2, _) = age_verdict(Some(now - 3 * 86400), now);
+        assert_eq!(rec2, "new");
+        assert_eq!(age_verdict(None, now).0, "unknown");
+    }
+
+    #[test]
+    fn repo_url_and_release_notes() {
+        assert_eq!(github_repo_from_url("git+https://github.com/eslint/eslint.git"),
+                   Some(("eslint".to_string(), "eslint".to_string())));
+        assert_eq!(github_repo_from_url("https://github.com/cli/cli/tree/trunk"),
+                   Some(("cli".to_string(), "cli".to_string())));
+        assert_eq!(github_repo_from_url("https://example.com/x"), None);
+
+        let rel = "[
+          {\"tag_name\":\"v1.2.3\",\"body\":\"# Notes\\n- Fixed a bug\\n- Added a flag\\n\"},
+          {\"tag_name\":\"v1.2.2\",\"body\":\"old\"}
+        ]";
+        let log = parse_github_releases(rel, "1.2.3");
+        assert_eq!(log, vec!["Notes".to_string(), "Fixed a bug".to_string(), "Added a flag".to_string()]);
+    }
+}
