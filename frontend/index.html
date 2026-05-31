@@ -998,8 +998,8 @@
 
   function closeModal(){ document.getElementById("modalBack").style.display="none"; }
   function renderPrefs(s){
-    s=s||{}; var src=s.sources||{npm:true,brew:true,pip:true,npx:true};
-    var rows=["npm","brew","pip","npx"].map(function(k){
+    s=s||{}; var src=s.sources||{npm:true,brew:true,pip:true,npx:true,manual:true};
+    var rows=["npm","brew","pip","npx","manual"].map(function(k){
       return '<label style="display:block;margin-top:2px"><input type="checkbox" id="prefSrc_'+k+'"'+(src[k]!==false?' checked':'')+'> '+k+'</label>';
     }).join("");
     var box=document.getElementById("modalBox");
@@ -1023,7 +1023,7 @@
     box.innerHTML='<div class="m-h">About napm<span class="x" data-close>×</span></div>'+
       '<div class="m-b"><div><img src="npstr-logo.svg" alt="npstr">'+
       '<b style="font-family:var(--mono);font-size:18px;color:#00880c">napm</b> '+esc(ver)+'</div>'+
-      '<div style="margin-top:8px">npstr AI Package Manager. Tracks the CLI tools you have across npm, brew, pip, and npx; tells you what is out of date and whether it is safe to take.</div>'+
+      '<div style="margin-top:8px">npstr AI Package Manager. Tracks the CLI tools you have across npm, brew, pip, npx, and manual installs; tells you what is out of date and whether it is safe to take.</div>'+
       '<div style="margin-top:8px">A late-90s file-sharing client for your dev tools. Homage, not affiliation.</div>'+
       '<div style="margin-top:8px"><a href="#" data-repo>github.com/umzcio/napm</a> · MIT</div></div>';
     document.getElementById("modalBack").style.display="flex";
@@ -1036,7 +1036,8 @@
           npm:document.getElementById("prefSrc_npm").checked,
           brew:document.getElementById("prefSrc_brew").checked,
           pip:document.getElementById("prefSrc_pip").checked,
-          npx:document.getElementById("prefSrc_npx").checked
+          npx:document.getElementById("prefSrc_npx").checked,
+          manual:document.getElementById("prefSrc_manual").checked
         }
       };
       closeModal();
