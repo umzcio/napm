@@ -238,8 +238,36 @@ A real signed/bundled macOS `.app` for daily use.
   the Dock, Finder, and the About panel show a generic placeholder. Verify the
   packaged build shows the npstr logo in all three.
 
+## M11 - AI tooling ecosystem (skills + MCP connectors)
+
+A candidate post-packaging milestone, wants a short research spike first. Treat
+skills and MCP servers as new best-effort ecosystems in the swarm, alongside
+npm/brew/pip/npx. The version and update story is less standardized than the
+package managers, so this is best-effort and labeled honestly, in the same
+spirit as the pip-search gap and the M9 manual source.
+
+- **MCP connectors.** Partly covered already, since many MCP servers ship as npm
+  or pip packages and ride the existing scanners. The new, napm-specific value is
+  the connector config layer: scan what is actually wired up in `~/.claude.json`,
+  Claude Desktop's `claude_desktop_config.json`, and project `.mcp.json` files,
+  then show each server's backing package, version, and whether it is outdated.
+  A "what connectors do I have plugged in, and are any stale" view that does not
+  exist anywhere today.
+- **Skills / plugins.** Claude Code plugins under `~/.claude/plugins/` have a real
+  marketplace install and version model. Scan installed plugins and check their
+  marketplace source for updates.
+- **Honesty.** Where a source or version cannot be resolved, label "unmanaged"
+  rather than implying an update path, exactly as M9 does for curl|bash tools.
+
+Research spike (do first): pin down the config file formats, where each install
+type records its version, and what "latest" reliably means per type before
+committing to a scanner.
+
 ## Deferred on purpose
 
 - `hold` issue-velocity scoring (needs GitHub issue-rate data + judgment) - v1.5.
 - npx usage-frequency intelligence (rank by how often you npx a tool) - v1.5.
+- **npx latest-drift hint** (display-only): resolve the real npm latest for npx
+  rows and show a passive "last ran X, latest Y" hint with no Update action,
+  since the action is just re-running. Never a fake update path - v1.5.
 - Cross-platform (macOS only for now).
