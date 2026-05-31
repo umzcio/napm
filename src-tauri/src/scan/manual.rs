@@ -30,9 +30,52 @@ pub fn first_version(s: &str) -> Option<String> {
     None
 }
 
+/// True when `real` (a fully-resolved path) belongs to something napm must not
+/// claim as a manual install: an app bundle, any managed root prefix, or a
+/// basename already returned by the npm/brew/pip/npx scans.
+pub fn is_managed(
+    real: &Path,
+    basename: &str,
+    managed_roots: &[PathBuf],
+    other_names: &BTreeSet<String>,
+) -> bool {
+    if other_names.contains(basename) {
+        return true;
+    }
+    if real.to_string_lossy().contains(".app/") {
+        return true;
+    }
+    managed_roots.iter().any(|root| real.starts_with(root))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn excludes_managed_paths_and_known_names() {
+        let mut roots: Vec<PathBuf> = vec![
+            PathBuf::from("/opt/homebrew"),
+            PathBuf::from("/usr/bin"),
+            PathBuf::from("/Users/x/.cargo"),
+        ];
+        roots.sort();
+        let mut names = BTreeSet::new();
+        names.insert("eslint".to_string());
+
+        // Homebrew cellar (under /opt/homebrew)
+        assert!(is_managed(Path::new("/opt/homebrew/Cellar/foo/1.0/bin/foo"), "foo", &roots, &names));
+        // app bundle CLI
+        assert!(is_managed(Path::new("/Applications/Docker.app/Contents/Resources/bin/docker"), "docker", &roots, &names));
+        // cargo toolchain
+        assert!(is_managed(Path::new("/Users/x/.cargo/bin/cargo"), "cargo", &roots, &names));
+        // system dir
+        assert!(is_managed(Path::new("/usr/bin/ls"), "ls", &roots, &names));
+        // name already owned by npm/pip/npx/brew scan, regardless of path
+        assert!(is_managed(Path::new("/Users/x/.local/bin/eslint"), "eslint", &roots, &names));
+        // a genuinely-manual tool: not excluded
+        assert!(!is_managed(Path::new("/Users/x/.local/bin/agy"), "agy", &roots, &names));
+    }
 
     #[test]
     fn version_from_filename() {
