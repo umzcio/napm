@@ -196,32 +196,37 @@ the M3 Transfers path, pins via `set_pin`, etc.); "Open ..." links use the
 `open_external` command with the homepage/repo from the scanned metadata. No
 shell logic in the frontend.
 
-## Next: M9 - Manual / standalone installs (best-effort source)
+## Done: M9 - Manual / standalone installs (best-effort source)
 
-A fifth source for tools installed outside any package manager - the ones
-dropped by `curl | bash` install scripts or direct downloads. Examples on the
-owner's machine: the **xAI CLI** (`curl https://x.ai/cli/install.sh | bash` ->
-`~/.grok/bin/grok` -> `grok-0.2.14-macos-aarch64`) and the **Google Antigravity
-CLI** (`curl https://antigravity.google/cli/install.sh | bash`). napm's four
-package-manager sources cannot see these because no package manager installed
-them.
+A fifth library source for tools installed outside any package manager (the ones
+dropped by `curl | bash` scripts or direct downloads, like the xAI `grok` CLI at
+`~/.grok/bin/grok`). A new `scan/manual.rs` does a broad `$PATH` sweep, resolves
+each binary through its symlink chain, and surfaces only what no package manager
+owns. The hard part is exclusion, not detection.
 
-This is honestly the hardest and most degraded source, label it clearly (like
-the pip search gap):
+- **Detection:** broad `$PATH` sweep -> canonicalize -> exclude anything under a
+  managed root (Homebrew prefix + resolved `brew --prefix`, `.app` bundles,
+  cargo/rustup/nvm/pyenv/volta/asdf/go, the npm global module dir from
+  `npm root -g`, the pip user script dir, OS/system dirs) or already returned by
+  the npm/brew/pip/npx scans -> dedup by resolved target (grok's several PATH
+  entries collapse to one). `/usr/local/bin` is intentionally NOT excluded since
+  it is a common manual-drop target.
+- **Version (hybrid):** a token in the resolved filename first (free, no
+  execution; `grok-0.2.14-macos-aarch64` -> `0.2.14`); only if that fails and the
+  binary resolves under `$HOME`, a timeout-bounded `<tool> --version` / `version`
+  (never `-v`, never a system-wide binary). Blank when unknown, never fabricated.
+- **Status:** a distinct neutral "unmanaged" badge (not green "current"). No
+  latest, no Update, no Roll back, and excluded from Update All, the safe-count,
+  the outdated count, and What's New. Right-click offers filesystem actions only:
+  Reveal in Finder, Copy path, Copy name, Copy version.
+- **Wiring:** a `manual` flag on `Sources` (default on), a View-menu toggle, and a
+  Preferences checkbox. Not a searchable source (no registry).
 
-- **Detection:** scan PATH plus known install dirs (`~/.grok/bin`,
-  `~/.local/bin`, `/usr/local/bin`, tool-specific dirs) for executables that no
-  package manager claims.
-- **Version:** no manifest. Sometimes the layout encodes it (grok ->
-  `grok-0.2.14-...`); otherwise fall back to running `<tool> --version` and
-  parsing wildly varying output. Best-effort, often blank.
-- **Latest / update:** no registry and no uniform updater. Most we can do is
-  "re-run the install script" or link to the project; no reliable safe/held
-  classification or one-click Get for these. Do NOT fake an update path that
-  does not exist.
-
-Scope: list the tool and a best-effort version, mark the source clearly as
-"manual / unmanaged," and be honest that updates are mostly out of napm's hands.
+Found and fixed in the milestone-end review: npm/npx globals and pip user scripts
+leaking in as "manual" (the name-based exclusion could not catch them because the
+scan rows carry package/distribution names, not binary basenames; fixed by adding
+the `npm root -g` and pip user-script path roots), and an over-broad first cut
+that wrongly excluded all of `/usr/local/bin`.
 
 ## M10 - Packaging
 
