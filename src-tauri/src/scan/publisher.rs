@@ -71,6 +71,29 @@ pub fn author_from_pkg_json(author: &Value) -> Option<String> {
     }
 }
 
+/// Derive a publisher handle from a whole package.json value: prefer the
+/// `author` name, then fall back to the GitHub/GitLab owner of the
+/// `repository` URL, then the `homepage`. Catches packages (like
+/// @google/gemini-cli) that omit `author` but point at a repo.
+pub fn publisher_from_pkg_json(v: &Value) -> Option<String> {
+    if let Some(h) = v.get("author").and_then(author_from_pkg_json).and_then(|n| to_handle(&n)) {
+        return Some(h);
+    }
+    // repository may be a string or an object { url: ... }
+    let repo_url = match v.get("repository") {
+        Some(Value::String(s)) => Some(s.as_str()),
+        Some(Value::Object(o)) => o.get("url").and_then(|u| u.as_str()),
+        _ => None,
+    };
+    if let Some(h) = repo_url.and_then(publisher_from_homepage).and_then(|o| to_handle(&o)) {
+        return Some(h);
+    }
+    v.get("homepage")
+        .and_then(|h| h.as_str())
+        .and_then(publisher_from_homepage)
+        .and_then(|o| to_handle(&o))
+}
+
 /// Derive a publisher from a project homepage URL. Prefers the GitHub/GitLab
 /// owner ("https://github.com/BurntSushi/ripgrep" -> "BurntSushi"); otherwise
 /// falls back to the second-level domain label ("https://www.openssl.org/"
@@ -160,6 +183,21 @@ mod tests {
         );
         assert_eq!(author_from_pkg_json(&json!(42)), None);
         assert_eq!(author_from_pkg_json(&json!({"email": "x@y.com"})), None);
+    }
+
+    #[test]
+    fn publisher_from_pkg_json_falls_back_to_repository() {
+        // no author, but repository points at a github org (the gemini-cli case)
+        let v = json!({"repository":{"type":"git","url":"git+https://github.com/google-gemini/gemini-cli.git"}});
+        assert_eq!(publisher_from_pkg_json(&v).as_deref(), Some("google-gemini"));
+        // author wins when present
+        let v2 = json!({"author":"Anthropic","repository":{"url":"https://github.com/x/y"}});
+        assert_eq!(publisher_from_pkg_json(&v2).as_deref(), Some("anthropic"));
+        // homepage fallback when no author or repository
+        let v3 = json!({"homepage":"https://eslint.org/"});
+        assert_eq!(publisher_from_pkg_json(&v3).as_deref(), Some("eslint"));
+        // nothing usable
+        assert_eq!(publisher_from_pkg_json(&json!({"name":"x"})), None);
     }
 
     #[test]

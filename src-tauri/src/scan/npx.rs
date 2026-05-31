@@ -76,11 +76,7 @@ pub fn scan_npx() -> Vec<InstalledTool> {
                 Some(ver) => ver.to_string(),
                 None => continue,
             };
-            let publisher = v
-                .get("author")
-                .and_then(super::publisher::author_from_pkg_json)
-                .and_then(|n| super::publisher::to_handle(&n))
-                .unwrap_or_default();
+            let publisher = super::publisher::publisher_from_pkg_json(&v).unwrap_or_default();
             let description = v
                 .get("description")
                 .and_then(|d| d.as_str())

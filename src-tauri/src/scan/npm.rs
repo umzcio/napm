@@ -84,11 +84,7 @@ fn enrich(rows: &mut [InstalledTool]) {
         let dir = base.join(&row.pkg);
         if let Ok(s) = std::fs::read_to_string(dir.join("package.json")) {
             if let Ok(v) = serde_json::from_str::<Value>(&s) {
-                if let Some(p) = v
-                    .get("author")
-                    .and_then(super::publisher::author_from_pkg_json)
-                    .and_then(|n| super::publisher::to_handle(&n))
-                {
+                if let Some(p) = super::publisher::publisher_from_pkg_json(&v) {
                     row.publisher = p;
                 }
                 if let Some(d) = v.get("description").and_then(|x| x.as_str()) {
