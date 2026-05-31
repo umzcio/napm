@@ -107,7 +107,8 @@ fn export_library(app: tauri::AppHandle, filename: String, content: String) {
     let safe = filename.replace(['/', '\\'], "_").replace("..", "_");
     let path = dir.join(safe);
     if std::fs::write(&path, content).is_ok() {
-        let _ = std::process::Command::new("open").arg(&dir).spawn();
+        // -R reveals and selects the new file in Finder.
+        let _ = std::process::Command::new("open").arg("-R").arg(&path).spawn();
     }
 }
 

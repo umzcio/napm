@@ -312,7 +312,7 @@
   function ping(n){ var h=0; for(var i=0;i<n.length;i++) h=(h*31+n.charCodeAt(i))>>>0; return 8+(h%320); }
   function handleFor(n){ var h=0; for(var i=0;i<n.length;i++) h=(h*31+n.charCodeAt(i))>>>0; return HANDLES[h%HANDLES.length]; }
   function fmtDl(n){ if(n>=1e6) return (n/1e6).toFixed(n>=1e7?0:1).replace(/\.0$/,"")+"M"; if(n>=1e3) return Math.round(n/1e3)+"K"; return ""+n; }
-  function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+  function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
   function ago(ts){ if(!ts) return "—"; var d=Math.floor((Date.now()/1000-ts)/86400);
     if(d<0) d=0; if(d<1) return "today"; if(d<7) return d+"d"; if(d<30) return Math.floor(d/7)+"w";
     if(d<365) return Math.floor(d/30)+"mo"; return Math.floor(d/365)+"y"; }
@@ -765,8 +765,9 @@
     var content, fn;
     if(format==="markdown"){
       fn="napm-library-"+date+".md";
+      var mdc=function(v){ return String(v).replace(/\|/g,"\\|"); };
       content="# napm library ("+date+")\n\n| Tool | Source | Installed | Latest | Publisher | Size |\n|---|---|---|---|---|---|\n"+
-        TOOLS.map(function(t){ return "| "+t.name+" | "+t.eco+" | "+(t.installed||"-")+" | "+t.latest+" | @"+(t.publisher||"unknown")+" | "+(t.size||"-")+" |"; }).join("\n")+"\n";
+        TOOLS.map(function(t){ return "| "+mdc(t.name)+" | "+mdc(t.eco)+" | "+mdc(t.installed||"-")+" | "+mdc(t.latest)+" | @"+mdc(t.publisher||"unknown")+" | "+mdc(t.size||"-")+" |"; }).join("\n")+"\n";
     } else {
       fn="napm-library-"+date+".json";
       content=JSON.stringify(TOOLS, null, 2);
@@ -856,23 +857,25 @@
   document.addEventListener("keydown",function(e){ if(e.key==="Escape"){ if(openMenuName!=null) closeMenu(); else closeModal(); } });
 
   function closeModal(){ document.getElementById("modalBack").style.display="none"; }
+  function renderPrefs(s){
+    s=s||{}; var src=s.sources||{npm:true,brew:true,pip:true,npx:true};
+    var rows=["npm","brew","pip","npx"].map(function(k){
+      return '<label style="display:block;margin-top:2px"><input type="checkbox" id="prefSrc_'+k+'"'+(src[k]!==false?' checked':'')+'> '+k+'</label>';
+    }).join("");
+    var box=document.getElementById("modalBox");
+    box.innerHTML='<div class="m-h">Preferences<span class="x" data-close>×</span></div>'+
+      '<div class="m-b">'+
+      '<div><b>GitHub token</b><div class="muted" style="font-size:11px">optional - raises the GitHub API rate limit for changelogs and the supply-chain wire.</div>'+
+      '<input id="prefToken" class="search" style="width:100%;margin-top:4px" value="'+esc(s.githubToken||"")+'"></div>'+
+      '<div style="margin-top:10px"><b>Sources</b>'+rows+'</div>'+
+      '<div style="margin-top:12px;text-align:right"><button class="btn" data-close>Cancel</button> <button class="btn primary" data-prefs-save>Save</button></div>'+
+      '</div>';
+    document.getElementById("modalBack").style.display="flex";
+  }
   window.showPrefs=function(){
     var i=inv(); if(!i) return;
-    i("get_settings").then(function(s){
-      s=s||{}; var src=s.sources||{npm:true,brew:true,pip:true,npx:true};
-      var rows=["npm","brew","pip","npx"].map(function(k){
-        return '<label style="display:block;margin-top:2px"><input type="checkbox" id="prefSrc_'+k+'"'+(src[k]!==false?' checked':'')+'> '+k+'</label>';
-      }).join("");
-      var box=document.getElementById("modalBox");
-      box.innerHTML='<div class="m-h">Preferences<span class="x" data-close>×</span></div>'+
-        '<div class="m-b">'+
-        '<div><b>GitHub token</b><div class="muted" style="font-size:11px">optional - raises the GitHub API rate limit for changelogs and the supply-chain wire.</div>'+
-        '<input id="prefToken" class="search" style="width:100%;margin-top:4px" value="'+esc(s.githubToken||"")+'"></div>'+
-        '<div style="margin-top:10px"><b>Sources</b>'+rows+'</div>'+
-        '<div style="margin-top:12px;text-align:right"><button class="btn" data-close>Cancel</button> <button class="btn primary" data-prefs-save>Save</button></div>'+
-        '</div>';
-      document.getElementById("modalBack").style.display="flex";
-    }).catch(function(){});
+    // On a get_settings failure, still open the dialog with safe defaults.
+    i("get_settings").then(renderPrefs).catch(function(){ renderPrefs({}); });
   };
   window.showAbout=function(){
     var box=document.getElementById("modalBox");
@@ -896,9 +899,11 @@
           npx:document.getElementById("prefSrc_npx").checked
         }
       };
-      var i=inv(); if(i) i("set_settings",{settings:settings});
       closeModal();
-      FEED_LOADED=false; scanLibrary(); // rescan with the new sources, refresh the feed
+      // Rescan only after the settings are persisted, so the scan reads the new sources.
+      var after=function(){ FEED_LOADED=false; scanLibrary(); };
+      var i=inv();
+      if(i) i("set_settings",{settings:settings}).then(after).catch(after); else after();
       return;
     }
     if(e.target.id==="modalBack" || e.target.hasAttribute("data-close")) { closeModal(); return; }

@@ -175,4 +175,17 @@ mod tests {
         assert_eq!(def.github_token, "");
         assert!(def.sources.brew); // corrupt -> all sources on, no panic
     }
+
+    #[test]
+    fn partial_settings_keeps_other_sources_on() {
+        // A settings.json that only disables npm must keep brew/pip/npx on,
+        // never drop the unspecified sources to false.
+        let s = temp_store();
+        std::fs::create_dir_all(&s.dir_for_test()).unwrap();
+        std::fs::write(s.dir_for_test().join("settings.json"), br#"{"sources":{"npm":false}}"#).unwrap();
+        let got = s.settings();
+        assert!(!got.sources.npm);
+        assert!(got.sources.brew && got.sources.pip && got.sources.npx);
+        assert_eq!(got.github_token, "");
+    }
 }
