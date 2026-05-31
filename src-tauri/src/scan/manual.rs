@@ -47,6 +47,9 @@ fn managed_roots() -> Vec<PathBuf> {
         PathBuf::from("/opt/homebrew"),
         PathBuf::from("/usr/local/Cellar"),
         PathBuf::from("/usr/local/Homebrew"),
+        // TeX Live: a tlmgr-managed tree, not manual installs. Without this its
+        // hundreds of bundled perl/lua scripts flood the library as "manual".
+        PathBuf::from("/usr/local/texlive"),
     ];
     // Resolved Homebrew prefix, if brew is installed (covers non-standard prefixes).
     if let Ok(out) = Command::new("brew").arg("--prefix").output() {
