@@ -459,7 +459,7 @@
       if(statusOf(TOOLS[ti])==="update"){ queueTransfer(ti, TOOLS[ti].latest, "update"); switchTab("transfers"); }
       return;
     }
-    TOOLS.push({name:p.name, eco:p.eco, pkg:p.pkg, installed:null, latest:p.version, size:p.size||"", publisher:"", description:p.description||"", updated:0, pinned:false});
+    TOOLS.push({name:p.name, eco:p.eco, pkg:p.pkg, installed:null, latest:p.version, size:p.size||"", publisher:"", description:p.description||"", updated:0, pinned:false, requested:true});
     queueTransfer(TOOLS.length-1, p.version, "install");
     switchTab("transfers");
   }
@@ -708,6 +708,7 @@
     if(!inv){ renderRows(); FEED_LOADED=false; loadWhatsNew(); renderStatus(); return; }
     inv("scan_installed").then(function(tools){
       TOOLS = tools || [];
+      selected=null; // the old index no longer maps into the rebuilt list
       renderRows(); FEED_LOADED=false; loadWhatsNew(); renderStatus();
     }).catch(function(e){ console.error("scan_installed failed", e); renderRows(); FEED_LOADED=false; loadWhatsNew(); renderStatus(); });
   }
@@ -766,7 +767,7 @@
       {label:"Quit", run:quitApp}
     ],
     edit: [
-      {label:"Copy tool details", disabled:function(){ return selected==null; }, run:copyToolDetails}
+      {label:"Copy tool details", disabled:function(){ return selected==null || !TOOLS[selected]; }, run:copyToolDetails}
     ],
     view: [
       {label:"Only tools I installed", checked:function(){return VIEW.requested;}, run:function(){toggleView("requested");}},
@@ -809,6 +810,7 @@
     }).join("");
     var r=anchor.getBoundingClientRect();
     pop.style.left=r.left+"px"; pop.style.top=r.bottom+"px"; pop.style.display="block";
+    var maxLeft=window.innerWidth-pop.offsetWidth-4; if(r.left>maxLeft) pop.style.left=Math.max(2,maxLeft)+"px";
     openMenuName=name;
     document.querySelectorAll("#menubar span").forEach(function(s){ s.classList.toggle("open", s.dataset.menu===name); });
   }
@@ -829,7 +831,7 @@
   document.addEventListener("click",function(e){
     if(openMenuName!=null && !e.target.closest("#menubar") && !e.target.closest("#menuPop")) closeMenu();
   });
-  document.addEventListener("keydown",function(e){ if(e.key==="Escape") closeMenu(); });
+  document.addEventListener("keydown",function(e){ if(e.key==="Escape"){ if(openMenuName!=null) closeMenu(); else closeModal(); } });
 
   function closeModal(){ document.getElementById("modalBack").style.display="none"; }
   window.showAbout=function(){
@@ -847,7 +849,7 @@
     if(e.target.id==="modalBack" || e.target.hasAttribute("data-close")) { closeModal(); return; }
     if(e.target.hasAttribute("data-repo")){ e.preventDefault(); var i=inv(); if(i) i("open_external",{url:"https://github.com/umzcio/napm"}); }
   });
-  document.addEventListener("keydown",function(e){ if(e.key==="Escape") closeModal(); });
+  // (Escape handling is unified with the menu handler above, layering menu over modal.)
 
   function setAppVersion(){
     var app=window.__TAURI__&&window.__TAURI__.app;

@@ -174,6 +174,15 @@ pub fn warm_brew(cache_dir: &Path) {
     let _ = load_catalog(cache_dir);
 }
 
+/// Drop the in-memory parsed catalog so the next load re-reads or re-fetches.
+/// Called when the user clears the on-disk caches, otherwise the fresh
+/// in-memory copy would mask the deletion until restart.
+pub fn invalidate_catalog() {
+    if let Ok(mut guard) = catalog_cell().lock() {
+        *guard = None;
+    }
+}
+
 /// Search brew formulae using the in-memory parsed catalog (backed by a 24h
 /// disk cache and analytics). If the catalog cannot be obtained at all, returns
 /// an empty list so brew is simply absent rather than an error.

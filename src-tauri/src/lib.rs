@@ -96,8 +96,8 @@ fn open_data_dir(app: tauri::AppHandle) {
 
 #[tauri::command]
 fn open_external(url: String) {
-    // Only open web URLs, never arbitrary local paths or args.
-    if url.starts_with("https://") || url.starts_with("http://") {
+    // Only open secure web URLs, never arbitrary local paths or args.
+    if url.starts_with("https://") {
         let _ = std::process::Command::new("open").arg(&url).spawn();
     }
 }
@@ -108,6 +108,9 @@ fn clear_caches(app: tauri::AppHandle) {
     for name in ["brew_catalog.json", "brew_analytics.json", "wire.json"] {
         let _ = std::fs::remove_file(dir.join(name));
     }
+    // Drop the in-memory parsed catalog too, else the fresh in-memory copy masks
+    // the deletion and the re-warm below just returns the stale data.
+    search::brew::invalidate_catalog();
     // Remove the per-version changelog caches (changelog_*.json).
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for e in entries.flatten() {
