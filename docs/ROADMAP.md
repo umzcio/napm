@@ -100,22 +100,35 @@ Deferred to v1.5: issue-velocity `hold`, brew/system-tool CVE mapping
 (Debian/Alpine), a one-click uninstall op, and the appetite dial's "security-only"
 far-left notch.
 
-## Next: M6 - Menu bar (File/Edit/View/Swarm/Help)
+## Done: M6 - Menu bar (File/Edit/View/Swarm/Help)
 
-Make the inert Win98 menu bar do real things.
+The inert Win98 menu bar now works: real beveled dropdown menus from a small
+data-driven engine (one open at a time, hover-switch, click-outside / Escape to
+close, checks for toggles and dots for the sort radio).
 
-| Menu | Items |
-|------|-------|
-| **File** | Rescan now; Export library (JSON / Markdown); Open data folder; Quit |
-| **Edit** | Preferences (default appetite, GitHub token, which sources to scan); Copy tool details |
-| **View** | Filter: **only tools I installed** (collapses ~287 to ~40 using brew `installed_on_request`); only outdated; by source; Sort by name/size/updated/status; toggle descriptions |
-| **Swarm** | Refresh registry caches; Enable/disable sources (npm/brew/pip/npx); jump to Search |
-| **Help** | About napm; Keyboard shortcuts; Repo link |
+- **View** (the standout, persisted in localStorage): **only tools I installed**
+  (hides brew dependencies via `installed_on_request`, the ~287 -> ~40 collapse),
+  only outdated, per-source toggles (npm/brew/pip/npx), sort by
+  name/size/updated/status, and a descriptions toggle. `renderRows` filters and
+  sorts a derived list while each row keeps its original index, so selection,
+  pins, and Get keep working.
+- **File**: Rescan now, Open data folder (Finder), Quit.
+- **Swarm**: Refresh registry caches (deletes the cached brew/wire files, drops
+  the in-memory catalog, re-warms in the background).
+- **Help**: About napm (a Win98 modal with the npstr logo + live version + repo
+  link), Repo on GitHub.
+- **Edit**: Copy tool details (selected row to clipboard; greyed when nothing is
+  selected).
+- Backend: a `requested` flag on `InstalledTool` (brew `installed_on_request`,
+  unknown -> shown) and three thin commands (`open_data_dir`, `open_external`
+  https-only, `clear_caches`). No new plugins; `open` via std::process.
 
-Standout: **View -> "only tools I installed"** is high-value and works offline
-today (most library rows are brew dependencies the user never chose).
+Deferred to a dedicated Preferences / Settings milestone: the Preferences dialog
+and the persisted settings store (GitHub token field, default-appetite setting,
+enable/disable sources), plus Export library (JSON / Markdown), Keyboard
+Shortcuts, and Alt+letter mnemonics.
 
-## M7 - Packaging
+## Next: M7 - Packaging
 
 A real signed/bundled macOS `.app` for daily use.
 
