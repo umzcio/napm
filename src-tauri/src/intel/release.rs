@@ -57,6 +57,28 @@ pub fn age_verdict(published: Option<i64>, now: i64) -> (String, String) {
     (rec.to_string(), label)
 }
 
+/// GitHub Search API response -> `total_count`.
+pub fn parse_search_total_count(json: &str) -> Option<u64> {
+    serde_json::from_str::<Value>(json).ok()?.get("total_count")?.as_u64()
+}
+
+/// Unix seconds (UTC) -> "YYYY-MM-DD" (inverse of the civil-day math in
+/// iso_to_unix; Howard Hinnant's civil_from_days).
+pub fn unix_to_ymd(unix: i64) -> String {
+    let days = unix.div_euclid(86400);
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if m <= 2 { y + 1 } else { y };
+    format!("{:04}-{:02}-{:02}", year, m, d)
+}
+
 /// Decide whether a fresh release should be held, from GitHub issue counts.
 /// Pure and unit-testable. `recent` = issues opened since the release,
 /// `baseline` = issues opened in the 90 days before it, `days_since` = days the
@@ -267,6 +289,14 @@ mod tests {
         // Exactly 8 days is "safe".
         let (rec8, _) = age_verdict(Some(now - 8 * 86400), now);
         assert_eq!(rec8, "safe");
+    }
+
+    #[test]
+    fn parses_search_total_and_formats_date() {
+        assert_eq!(parse_search_total_count(r#"{"total_count":42,"items":[]}"#), Some(42));
+        assert_eq!(parse_search_total_count("not json"), None);
+        assert_eq!(unix_to_ymd(1714564800), "2024-05-01");
+        assert_eq!(unix_to_ymd(0), "1970-01-01");
     }
 
     #[test]
