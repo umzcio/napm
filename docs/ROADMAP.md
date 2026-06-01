@@ -306,6 +306,23 @@ zMeet/zMD/fiddle: `Developer ID Application: The University of Montana
   history, the notary config and updater privkey are gitignored, LICENSE/README
   in order, and a tagged release flow.
 
+### Deferred polish (Done, shipped in v0.1.3)
+
+Four parked items, batched and shipped:
+- **Issue-velocity "hold".** A "new" verdict (release <= 7 days) upgrades to "hold"
+  when, for a token-resolved GitHub repo, issues are opening >= 2x the repo's
+  90-day baseline AND at least 3 new issues since release. Token-gated, 12h-TTL
+  cached, with a reason line. No token / no repo / HTTP failure / brew stays
+  "new"; a hold is never fabricated.
+- **npx latest-drift hint.** A lazy `npx_latest` resolves the registry
+  `dist-tags.latest` after the library renders; npx rows whose cached version
+  differs show a muted "cached vX, npx pulls vY on next run" hint. The row stays
+  "current" and never joins Update All.
+- **npstr DMG background.** An original gray-beveled installer background
+  (`scripts/make-dmg-bg.py`) wired via `bundle.macOS.dmg`.
+- **Crate rename.** `app` -> `napm`, so the process/binary is `napm` (was `app`);
+  the WebView cache path (`com.napm.app`) is unchanged.
+
 ## M11 - AI tooling ecosystem (skills + MCP connectors)
 
 A candidate post-packaging milestone, wants a short research spike first. Treat
