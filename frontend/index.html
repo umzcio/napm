@@ -876,12 +876,13 @@
     if(!pkgs.length) return;
     i("npx_latest",{pkgs:pkgs}).then(function(rows){
       NPX_DRIFT={}; // reset so a tool that no longer drifts loses its stale hint
-      var changed=false;
       (rows||[]).forEach(function(r){
         var t=TOOLS.find(function(x){return x.eco==="npx"&&x.pkg===r.pkg;});
-        if(t && t.installed && r.latest && r.latest!==t.installed){ NPX_DRIFT[r.pkg]=r.latest; changed=true; }
+        if(t && t.installed && r.latest && r.latest!==t.installed){ NPX_DRIFT[r.pkg]=r.latest; }
       });
-      if(changed) renderRows();
+      // Always re-render: the first render used the previous NPX_DRIFT, so a tool
+      // that just caught up must re-render to drop its now-stale hint.
+      renderRows();
     }).catch(function(){});
   }
   // Update appetite dial: load saved level, label it, re-classify live on drag.
