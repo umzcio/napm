@@ -262,16 +262,29 @@ Hard-won lessons (carry into M10b):
 - The bundled process is named `app` (the Cargo crate name), not `napm` - matters
   for any process/cache management scripts. Consider renaming the crate.
 
-### M10b - Distributable & self-updating (Built, awaiting public flip)
+### M10b - Distributable & self-updating (Done)
 
-Implementation is complete and verified locally. The Tauri updater plugin is
-wired (check on launch + Help menu, signature-verified install), and a signed +
-notarized + stapled v0.1.0 build (both the `.app` and the `.dmg` are
-`Notarized Developer ID`, Gatekeeper accepted) is published as the `v0.1.0`
-release with `latest.json` + `napm.app.tar.gz`. The baked-in updater pubkey
-matches the signing key. The git history is secret-clean. Two steps remain and
-are gated on owner approval: flipping the repo public, and the live updater
-end-to-end test (0.1.0 -> 0.1.1), which needs the public release endpoint.
+Shipped and proven end to end. The Tauri updater plugin is wired (check on
+launch + Help -> Check for updates, signature-verified install). Every release
+is signed + notarized + stapled for BOTH the `.app` and the `.dmg`
+(`release.sh` adds the dmg notary round-trip Tauri skips), all `Notarized
+Developer ID` and Gatekeeper accepted. The repo is public; v0.1.0, v0.1.1, and
+v0.1.2 are published with `latest.json` + `napm.app.tar.gz`.
+
+Verified:
+- **Live updater test:** an installed 0.1.0 detected, downloaded, signature-
+  verified, installed, and relaunched as 0.1.1; the post-update app stayed
+  notarized + stapled. The 0.1.2 window-control fix was then delivered the same
+  way.
+- **Signature enforcement:** `src-tauri/tests/updater_signature.rs` (using the
+  shipped `minisign-verify` crate against the baked-in pubkey) proves a valid
+  signature verifies and that a tampered payload or signature is rejected.
+- **Honesty:** a failed/blocked check never fabricates an update; "Check for
+  updates" reports the real installed version; the launch check waits for the
+  splash to clear.
+- **Secrets:** git history is clean (no `.p8`, updater private key, or notary
+  config ever committed; all commits authored umzcio noreply). The updater
+  private key lives at `~/.napm/napm-updater.key` (owner must back it up).
 
 A notarized `.dmg` that opens cleanly anywhere, plus in-app updates, published
 on a now-public GitHub repo. Reuses the signing/notarization setup proven in
