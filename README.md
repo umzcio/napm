@@ -179,6 +179,10 @@ Two layers. A native Rust backend owns every shell call and all version logic an
 
 Grab the signed, notarized `.dmg` from the [latest release](https://github.com/umzcio/napm/releases/latest), open it, and drag **napm** to Applications. It opens with no Gatekeeper warning and keeps itself up to date from then on.
 
+### Updating
+
+napm updates itself. On launch, once the library finishes scanning, it quietly checks the release feed. If a newer signed version exists, a beveled "Update available" prompt appears with the release notes and an Update now / Later choice. Choosing Update now downloads the verified build, installs it, and relaunches. You can also trigger a check any time from **Help -> Check for updates**. Every update is signature-verified against a key baked into the app, so a tampered download is rejected rather than installed.
+
 ### Build from source
 
 **Prerequisites**
@@ -201,6 +205,12 @@ npm run tauri build
 ```
 
 The first launch compiles the Rust backend, so give it a minute. After that the dial-up splash plays while your real installed tools fill the Shared Library.
+
+### Releasing (maintainers)
+
+Releases are cut locally. `scripts/release.sh` sources `scripts/.notary-config.local` (a gitignored copy of `scripts/.notary-config.example`) for the Apple Developer ID identity, the App Store Connect API key, and the updater signing key, then runs `npm run tauri build`. Tauri signs, notarizes, staples, and emits the `.dmg` plus the updater artifacts (`napm.app.tar.gz` and its `.sig`) in one pass. `scripts/make-latest-json.sh <version> <tag> "notes"` assembles `latest.json` from the build's signature so the manifest is never hand-edited. Upload the `.dmg`, `napm.app.tar.gz`, and `latest.json` to a GitHub release; the updater endpoint always reads the newest published release.
+
+The Apple `.p8` key, `scripts/.notary-config.local`, and the updater private key are never committed. The updater public key in `tauri.conf.json` is safe to commit, since it only verifies.
 
 ---
 
