@@ -24,3 +24,6 @@ napm.zip
 
 # Updater manifest is a release artifact, not committed
 /latest.json
+
+# Internal planning artifacts (specs/plans) - kept local, not in the repo
+docs/superpowers/

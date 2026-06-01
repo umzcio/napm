@@ -1,7 +1,6 @@
 # napm Roadmap
 
-Living roadmap for napm (npstr AI Package Manager). The original design spec is
-`docs/superpowers/specs/2026-05-30-napm-real-app-design.md`; this file tracks
+Living roadmap for napm (npstr AI Package Manager). This file tracks
 current status and the path forward. Guiding principle: keep the late-90s
 file-sharing look and feel, but **every element must carry real data or
 function** (no decorative jokes).
