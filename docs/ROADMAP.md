@@ -234,24 +234,34 @@ Packaging grew past one milestone once installer and auto-updater were added, so
 it is split. M10a delivers a real working local app (the riskiest napm-specific
 piece, PATH, first); M10b makes it distributable and self-updating.
 
-### M10a - Real app bundle + PATH
+### M10a - Real app bundle + PATH (Done)
 
-A real macOS `.app` you run from `/Applications` that actually finds your tools.
+A real macOS `.app` that runs from `/Applications`, finds all the user's tools
+from a Dock launch, shows the npstr icon and correct version, and preserves
+history. Verified live.
 
-- Fix the bundle identifier (`com.tauri.dev` -> `com.napm.app`). Note this moves
-  the app-data dir (`~/Library/Application Support/<identifier>/`), so decide
-  whether to migrate existing pins/history/settings or start fresh.
-- **PATH resolution (the napm-specific crux).** A Finder/Dock-launched app does
-  not inherit the shell PATH (it gets a bare `/usr/bin:/bin:/usr/sbin:/sbin`), so
-  a bundled napm would not find `npm`/`brew`/`pip3` or any manual tool. Fix:
-  capture the real login-shell PATH at startup (`$SHELL -lic 'echo $PATH'`) and
-  set it on napm's process before anything spawns. This also fixes the M9 manual
-  scanner for free, since it walks `$PATH`. Handle shell quirks robustly.
-- Set the real version in `tauri.conf.json` / `Cargo.toml` (single source; the
-  titlebar reads it live) and fill author/repo metadata in `Cargo.toml`.
-- Verify the npstr icon (`icons/icon.icns`, already configured) embeds in the
-  packaged `.app` and shows in the Dock, Finder, and the About panel (it does not
-  appear in `tauri dev` because that runs the unbundled binary).
+- **Identifier** `com.tauri.dev` -> `com.napm.app`, with a one-time no-clobber
+  migration of `pins/history/settings.json` from the old app-data dir.
+- **PATH resolution** (the napm-specific crux): a Finder/Dock-launched app gets a
+  bare `/usr/bin:/bin:/usr/sbin:/sbin`, so a bundled napm would find nothing. Fixed
+  by capturing the login-shell PATH at startup (`$SHELL -ilc` with a sentinel,
+  timeout-bounded, fish-safe) and setting it process-wide before anything spawns.
+  Also fixes the M9 manual scanner for free.
+- **Responsiveness:** the scan commands are now `#[tauri::command(async)]` so a
+  slow `pip --outdated` no longer freezes the UI thread; the dial-up splash holds
+  until the first scan completes. `/usr/local/texlive` excluded from the manual
+  scan (hundreds of tlmgr scripts were flooding the library).
+- **Metadata** filled; version stays `0.1.0`. The npstr icon embeds in the `.app`.
+
+Hard-won lessons (carry into M10b):
+- **Fonts in WKWebView:** a Google-Fonts woff2 *subset* loaded but would not render
+  in WKWebView (it rendered in Chromium, which masked it). Ship the full **TTF**,
+  loaded via both CSS `@font-face` and the JS `FontFace` API. Do not rely on a CDN
+  font at runtime.
+- **WKWebView asset cache** is keyed to the bundle id and survives reinstalls; the
+  auto-updater must bust it on update.
+- The bundled process is named `app` (the Cargo crate name), not `napm` - matters
+  for any process/cache management scripts. Consider renaming the crate.
 
 ### M10b - Distributable & self-updating
 
