@@ -388,6 +388,7 @@
       var kind = (st==="update"&&!npx) ? bumpKind(t.installed,t.latest) : "none";
       var safe = st==="update" && !npx && isSafe(kind);
       var held = st==="update" && !npx && !safe;
+      var drift = (npx && NPX_DRIFT[t.pkg]) ? '<div class="muted" style="font-size:11px">cached v'+esc(t.installed)+', npx pulls v'+esc(NPX_DRIFT[t.pkg])+' on next run</div>' : '';
       var g = manual?["?","g-man"] : npx?["♪","g-off"] : st==="update" ? (safe?["↑","g-safe"]:["↑","g-hold"]) : GLYPH[st];
       var gTitle = manual?"unmanaged (no package manager owns this)" : (st==="update"&&!npx) ? kind+" update"+(held?" - above your appetite":"") : "";
       var tr=document.createElement("tr"); tr.dataset.i=i;
@@ -398,7 +399,7 @@
       tr.innerHTML=
         '<td class="glyph '+g[1]+'"'+(gTitle?' title="'+esc(gTitle)+'"':'')+'>'+g[0]+'</td>'+
         '<td>'+(t.pinned?'📌 ':'')+esc(t.name)+' <span class="src '+esc(t.eco)+'">'+esc(t.eco)+'</span>'+
-          (VIEW.desc&&t.description?'<span class="toold">'+esc(t.description)+'</span>':'')+'</td>'+
+          (VIEW.desc&&t.description?'<span class="toold">'+esc(t.description)+'</span>':'')+drift+'</td>'+
         '<td class="'+(off?'muted':'')+'">'+esc(t.installed||"—")+'</td>'+
         '<td class="'+((npx||manual)?'muted':safe?'vernew':held?'verhold':'muted')+'">'+((npx||manual)?"—":esc(t.latest))+'</td>'+
         '<td class="user'+(t.publisher?'':' muted')+'">@'+esc(t.publisher||"unknown")+'</td>'+
@@ -855,16 +856,33 @@
   function nextStep(){ if(si>=steps.length) return; sBody.innerHTML=steps.slice(0,si+1).join('<br>'); si++; setTimeout(nextStep,560); }
 
   var DID_UPDATE_CHECK=false;
+  var NPX_DRIFT={}; // npx pkg -> registry latest, only when it differs from the cached version
   function scanLibrary(){
     var inv = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
     if(!inv){ renderRows(); FEED_LOADED=false; loadWhatsNew(); renderStatus(); dismissSplash(); return; }
     inv("scan_installed").then(function(tools){
       TOOLS = tools || [];
       selected=null; // the old index no longer maps into the rebuilt list
-      renderRows(); FEED_LOADED=false; loadWhatsNew(); renderStatus(); dismissSplash();
+      renderRows(); annotateNpxDrift(); FEED_LOADED=false; loadWhatsNew(); renderStatus(); dismissSplash();
       // Once per session, after the UI settles, check for an app update unobtrusively.
       if(!DID_UPDATE_CHECK){ DID_UPDATE_CHECK=true; setTimeout(function(){ checkForUpdate(false); }, 1200); }
     }).catch(function(e){ console.error("scan_installed failed", e); renderRows(); FEED_LOADED=false; loadWhatsNew(); renderStatus(); dismissSplash(); });
+  }
+  // After the library renders, resolve registry latest for npx tools and flag
+  // any whose cached version differs (npx re-resolves @latest on next run).
+  function annotateNpxDrift(){
+    var i=inv(); if(!i) return;
+    var pkgs=TOOLS.filter(function(t){return t.eco==="npx";}).map(function(t){return t.pkg;});
+    if(!pkgs.length) return;
+    i("npx_latest",{pkgs:pkgs}).then(function(rows){
+      NPX_DRIFT={}; // reset so a tool that no longer drifts loses its stale hint
+      var changed=false;
+      (rows||[]).forEach(function(r){
+        var t=TOOLS.find(function(x){return x.eco==="npx"&&x.pkg===r.pkg;});
+        if(t && t.installed && r.latest && r.latest!==t.installed){ NPX_DRIFT[r.pkg]=r.latest; changed=true; }
+      });
+      if(changed) renderRows();
+    }).catch(function(){});
   }
   // Update appetite dial: load saved level, label it, re-classify live on drag.
   (function(){
