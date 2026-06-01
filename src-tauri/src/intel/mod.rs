@@ -49,7 +49,8 @@ pub struct ReleaseInfo {
     pub eco: String,
     pub version: String,
     pub age_label: String,           // "released 6 days ago", or "" when unknown
-    pub recommendation: String,      // "safe" | "new" | "unknown"
+    pub recommendation: String,      // "safe" | "new" | "hold" | "unknown"
+    pub reason: String,              // hold explanation, "" otherwise
 }
 
 /// Lazily-loaded detail for a single advisory (fetched when a card is expanded).
@@ -105,8 +106,8 @@ pub fn whats_new(installed: &[ToolRef], verdict_scope: &[String], cache_dir: &Pa
                     let pkg = t.pkg.clone();
                     let ver = t.latest.clone();
                     inner.spawn(move || -> ReleaseInfo {
-                        let (rec, age_label) = release::release_age(&eco, &pkg, &ver, now);
-                        ReleaseInfo { pkg, eco, version: ver, age_label, recommendation: rec }
+                        let (rec, age_label, reason) = release::release_verdict(&eco, &pkg, &ver, now, cache_dir);
+                        ReleaseInfo { pkg, eco, version: ver, age_label, recommendation: rec, reason }
                     })
                 }).collect();
                 handles.into_iter().filter_map(|h| h.join().ok()).collect::<Vec<_>>()

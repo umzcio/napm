@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::Path;
 
@@ -138,24 +139,125 @@ pub fn parse_github_releases(json: &str, version: &str) -> Vec<String> {
         .collect()
 }
 
-/// (recommendation, age_label) for a package version, derived from the registry.
-/// npm/npx: GET the npm registry doc and extract the publish time.
-/// pip: GET the PyPI project doc and extract the upload time.
-/// brew: no reliable per-version publish date; returns ("unknown", "").
-pub fn release_age(eco: &str, pkg: &str, version: &str, now: i64) -> (String, String) {
+/// Extract a GitHub repo URL from an already-fetched registry doc for `eco`.
+fn repo_url_from_doc(eco: &str, body: &str) -> Option<String> {
+    let v: Value = serde_json::from_str(body).ok()?;
     match eco {
+        "npm" | "npx" => v.get("repository")?.get("url")?.as_str().map(String::from),
+        "pip" => {
+            let info = v.get("info")?;
+            if let Some(urls) = info.get("project_urls").and_then(|u| u.as_object()) {
+                for (_, val) in urls {
+                    if let Some(s) = val.as_str() {
+                        if s.contains("github.com") {
+                            return Some(s.to_string());
+                        }
+                    }
+                }
+            }
+            info.get("home_page").and_then(|h| h.as_str()).filter(|s| s.contains("github.com")).map(String::from)
+        }
+        _ => None,
+    }
+}
+
+/// (recommendation, age_label, reason) for a package version. npm/npx and pip
+/// fetch the registry doc once, derive the publish time, and - only when the
+/// release is fresh ("new") - run a token-gated GitHub issue-velocity check that
+/// can upgrade the verdict to "hold". brew has no per-version date: ("unknown","","").
+pub fn release_verdict(eco: &str, pkg: &str, version: &str, now: i64, cache_dir: &Path) -> (String, String, String) {
+    let (doc_url, published) = match eco {
         "npm" | "npx" => {
             let url = format!("https://registry.npmjs.org/{}", crate::http::encode(pkg));
-            let published = crate::http::get(&url).ok().and_then(|body| parse_npm_time(&body, version));
-            age_verdict(published, now)
+            let body = crate::http::get(&url).ok();
+            let published = body.as_deref().and_then(|b| parse_npm_time(b, version));
+            (body, published)
         }
         "pip" => {
             let url = format!("https://pypi.org/pypi/{}/json", crate::http::encode(pkg));
-            let published = crate::http::get(&url).ok().and_then(|body| parse_pypi_time(&body, version));
-            age_verdict(published, now)
+            let body = crate::http::get(&url).ok();
+            let published = body.as_deref().and_then(|b| parse_pypi_time(b, version));
+            (body, published)
         }
-        _ => ("unknown".into(), "".into()),
+        _ => (None, None),
+    };
+    let (rec, age_label) = age_verdict(published, now);
+    if rec != "new" {
+        return (rec, age_label, String::new());
     }
+    // Fresh: try to upgrade to "hold" from issue velocity. Any miss stays "new".
+    let upgraded = (|| {
+        let body = doc_url.as_deref()?;
+        let repo_url = repo_url_from_doc(eco, body)?;
+        let (owner, repo) = github_repo_from_url(&repo_url)?;
+        velocity_verdict(eco, pkg, version, &owner, &repo, published?, now, cache_dir)
+    })();
+    match upgraded {
+        Some((r, reason)) => (r, age_label, reason),
+        None => (rec, age_label, String::new()),
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct HoldCache {
+    checked_ts: i64,
+    recommendation: String,
+    reason: String,
+}
+
+/// GitHub issue-velocity check for a fresh release. Returns Some(("hold", reason))
+/// when issues are opening fast enough to warrant holding, else None (stay "new").
+/// Token-gated (no token -> None), cached 12h per (eco,pkg,version). Any HTTP
+/// failure returns None and is not cached. `published` is the release unix time.
+fn velocity_verdict(
+    eco: &str,
+    pkg: &str,
+    version: &str,
+    owner: &str,
+    repo: &str,
+    published: i64,
+    now: i64,
+    cache_dir: &Path,
+) -> Option<(String, String)> {
+    // Cache (12h TTL) so velocity is re-checked through the fresh window.
+    let safe_eco = eco.replace(['/', '\\'], "_").replace("..", "_");
+    let safe_pkg = pkg.replace(['/', '@', '\\'], "_").replace("..", "_");
+    let safe_ver = version.replace(['/', '\\'], "_").replace("..", "_");
+    let cache_file = cache_dir.join(format!("hold_{}_{}_{}.json", safe_eco, safe_pkg, safe_ver));
+    if let Ok(s) = std::fs::read_to_string(&cache_file) {
+        if let Ok(c) = serde_json::from_str::<HoldCache>(&s) {
+            if now - c.checked_ts < 12 * 3600 {
+                return if c.recommendation == "hold" { Some((c.recommendation, c.reason)) } else { None };
+            }
+        }
+    }
+
+    let token = super::github_token(cache_dir)?; // no token -> stay "new"
+    let auth = format!("Bearer {}", token);
+    let headers: Vec<(&str, &str)> = vec![("Accept", "application/vnd.github+json"), ("Authorization", &auth)];
+
+    let release_ymd = unix_to_ymd(published);
+    let start_ymd = unix_to_ymd(published - 90 * 86400);
+    let count = |q: String| -> Option<u64> {
+        let url = format!("https://api.github.com/search/issues?q={}&per_page=1", crate::http::encode(&q));
+        let body = crate::http::get_with_headers(&url, &headers).ok()?;
+        parse_search_total_count(&body)
+    };
+    let recent = count(format!("repo:{}/{} type:issue created:>={}", owner, repo, release_ymd))?;
+    let baseline = count(format!("repo:{}/{} type:issue created:{}..{}", owner, repo, start_ymd, release_ymd))?;
+    let days_since = ((now - published).max(0)) / 86400;
+
+    let (rec, reason) = match velocity_hold(recent, baseline, days_since) {
+        Some(mult) => (
+            "hold".to_string(),
+            format!("issues opening about {}x faster than usual since release", mult),
+        ),
+        None => ("new".to_string(), String::new()),
+    };
+    if let Ok(s) = serde_json::to_string(&HoldCache { checked_ts: now, recommendation: rec.clone(), reason: reason.clone() }) {
+        let _ = std::fs::write(&cache_file, s);
+    }
+    if rec == "hold" { Some((rec, reason)) } else { None }
 }
 
 /// Fetch and cache the GitHub changelog for (eco, pkg, version).
