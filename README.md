@@ -7,86 +7,120 @@
 </p>
 
 <p align="center">
-  <strong>napm is the AI Package Manager that thinks it is a 1999 file-sharing client</strong><br/>
-  Track every command-line dev tool you have across npm, Homebrew, pip, and npx. See what is outdated, whether the update is safe to take, and roll back when it is not.<br/><br/>
+  <strong>The desktop package manager that thinks it is a 1999 file-sharing client.</strong><br/>
+  Track every command-line dev tool you have across npm, Homebrew, pip, npx, and manual installs. See what is outdated, whether the update is safe to take, whether anything you are holding is compromised, and roll back when an update goes wrong.<br/><br/>
   Your CLIs are the files. The registry is the swarm. Updating is a download.
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/status-alpha-3A32FF?style=flat-square" alt="Alpha" />
+  <a href="#why">Why</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#install">Install</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="#design-decisions">Design Decisions</a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/status-v0.1.0-3A32FF?style=flat-square" alt="v0.1.0" />
   <img src="https://img.shields.io/badge/license-MIT-3A32FF?style=flat-square" alt="MIT" />
-  <img src="https://img.shields.io/badge/stack-Tauri%20%7C%20Rust%20%7C%20Vanilla%20JS-6A1BFF?style=flat-square" alt="Stack" />
-  <img src="https://img.shields.io/badge/sources-npm%20%7C%20brew%20%7C%20pip%20%7C%20npx-1B5CFF?style=flat-square" alt="Sources" />
+  <img src="https://img.shields.io/badge/stack-Tauri%202%20%7C%20Rust%20%7C%20Vanilla%20JS-6A1BFF?style=flat-square" alt="Stack" />
+  <img src="https://img.shields.io/badge/sources-npm%20%7C%20brew%20%7C%20pip%20%7C%20npx%20%7C%20manual-1B5CFF?style=flat-square" alt="Sources" />
+  <img src="https://img.shields.io/badge/platform-macOS%20(Apple%20silicon)-080a0f?style=flat-square" alt="macOS" />
+</p>
+
+<p align="center">
+  <img src="docs/media/shared-library.png" alt="napm Shared Library: installed CLI tools across npm, brew, pip, npx, and manual installs, with installed vs latest versions, a status glyph, the real publisher, on-disk size, and the Update Appetite dial" width="900" />
 </p>
 
 ---
 
-## Origin
+## Why
 
-**napm** stands for **n**pstr **A**I **P**ackage **M**anager. It is an npm pun first and a love letter to the late-90s peer-to-peer era second.
+Every developer accumulates a drawer of command-line tools: a dozen npm globals, a hundred Homebrew formulae, pip utilities, the occasional `npx` one-off, and a few things a `curl | bash` script dropped on your PATH. Nothing tracks them as one set. `npm outdated`, `brew outdated`, and `pip list --outdated` each answer for their own corner, none of them tell you whether an update is safe to take, and not one of them can answer the question you actually have at 2am: "this tool started misbehaving, what changed and when."
 
-Back then a generation hoarded files inside a gray beveled window: a search bar up top, a list of who was sharing what, a transfers tab crawling along at 56 kbps, a throttle slider nobody understood. napm borrows that exact interface and points it at the thing developers actually hoard today, command-line tools.
+napm is that single view. It scans every ecosystem you use, tells you what is current, outdated, or unmanaged, scores whether each update is safe to take, scans everything you have installed against a live vulnerability database, and logs every version change so a regression has a paper trail. Then it wears all of that as a late-90s peer-to-peer file-sharing client, because the metaphor is exact: your installed tools are a Shared Library, a newer release is a peer with a better copy, taking an update is a download, and the heavily-downloaded package is the safe grab with a flame next to it.
 
-Your installed CLIs become your Shared Library. A newer release on the registry is just a peer sharing a better copy. Taking an update is a download. The flame marker still means "everybody has this one."
-
-The name and the styling are homage and parody. The original brand and its logo are deliberately not used. napm's mark is its own: a cat with a shipping box for a head, because a package manager should look like the package.
-
----
-
-## How It Works
-
-```
-Scan your system  -->  See what is outdated  -->  Ask if the update is safe  -->  Update or roll back
- npm / brew / pip / npx     the Shared Library          the What's New feed           the Transfers tab
-```
-
-napm runs one batch command per ecosystem to learn what you have installed and what the registries consider current, derives whether each tool is current, outdated, or missing, and then lets you act on it. Every version change is logged so the question "claude-code started misbehaving, what changed and when" actually has an answer.
-
-All shell access and version logic live in a native Rust backend. The frontend never shells out. It only asks.
-
----
-
-## The Four Panes
-
-| Tab | What it does |
-|-----|--------------|
-| **Shared Library** | Your installed CLIs across npm, Homebrew, pip, and npx, with installed vs latest, a status glyph, and a pin to freeze a version out of Update All |
-| **Search the swarm** | Search the registries (not your disk), sorted by weekly downloads as the trust signal, and install straight from a result |
-| **What's New** | One card per available update telling you whether to take it: safe, security, or hold, with the changelog and the signals behind the call |
-| **Transfers** | Where versions actually change: real streamed install output, an honest exit code, a rollback-able history |
+Everything underneath is real: real scans, real publishers, real on-disk sizes, real security advisories, real install and rollback commands with real streamed output and honest exit codes. There is no fake data and no decorative widget that does nothing.
 
 ---
 
 ## Features
 
-### Shared Library
-- One batch scan per ecosystem (npm, brew, pip, npx), merged into a single view
-- Status derived honestly: installed equals latest is current, they differ is an update, no installed version is not installed
-- **npx as a first-class source**: tools you have run via `npx` show up with their cached version, and a Promote to global button graduates one into a real managed install
+### Shared Library (the installed view)
+- **Five sources, one view**: npm, Homebrew, pip, and npx scanned with one batch command each, plus a best-effort **manual / unmanaged** source that sweeps `$PATH` for tools no package manager owns (the `curl | bash` installs)
+- **Honest status** per tool: current, update available, offline, or unmanaged, with a glyph and a real installed-vs-latest comparison that never flags a downgrade as an update
+- **Real metadata, every column**: the **Shared By** handle is the package's actual publisher (from offline metadata), **Size** is the real on-disk footprint, **Updated** is when the tool last changed on disk, and each row carries its real one-line description
+- **Update Appetite dial**: the old throttle slider, made real. Set how big a version jump counts as safe (patch only, up to minor, or bleeding edge), computed from semver distance. It re-classifies the library live and scopes Update All
 - **Pins**: freeze a tool's version so Update All skips it, while it still shows as outdated so you never lose track
+- **npx as a first-class source**: tools you have run via `npx` appear with their cached version
+- **View controls**: filter to only tools you installed (hides Homebrew dependencies), only outdated, or by source; sort by name, size, updated, or status
 
-### Transfers
-- Real install, update, and rollback commands with stdout and stderr streamed live into the active row
-- Success or failure shown from the actual exit code, not a fake progress bar
-- A persistent history of every install, update, and rollback with a timestamp and a from/to
-- Rollback for npm and pip. Homebrew is gated honestly, since it keeps no old bottles and cannot reliably downgrade
+### What's New (the decision feed)
+- **Protect what you have**: one batched OSV query over every installed tool at its current version flags `malicious` (supply-chain hijacks, from OpenSSF malicious-packages and GitHub malware data) and `vulnerable` (CVE / GHSA), regardless of the appetite dial. A truncated or failed lookup is treated as a failed check, never a clean result
+- **The supply-chain wire**: a bulletin strip fed by recent npm and pip malware advisories, so big ecosystem events surface even for packages you do not have
+- **Update verdicts**: `safe` for settled releases past an age threshold with no advisories, or "new, little signal yet" for a fresh release rather than a confident guess. Changelogs load on demand from the upstream GitHub releases
+- **Honest by construction**: napm never implies "safe" when a check could not run. Homebrew is excluded from the OSV scan (no Homebrew ecosystem) and labeled, not shown as clean. A malicious package with no fix shows a copyable remove command, not a fake one-click
 
-### Search the swarm
-- Federated across npm and Homebrew by default, with source-filter chips to scope to one registry
-- Weekly downloads shown as the popularity and trust signal, with a flame marker on heavily shared packages
-- pip is exact-name lookup only, labeled as such, because PyPI removed its search API and napm does not fake what it cannot do
+### Search the swarm (registry discovery)
+- **Federated** across npm and the Homebrew catalog by default, with source-filter chips to scope to one registry
+- **Weekly downloads** shown as the popularity and trust signal, with a flame marker on heavily-shared packages, sorted so the safe grab is on top
+- **Honest about pip**: PyPI removed its search API, so pip is exact-name lookup only, labeled as such. napm does not present fuzzy pip search that returns nothing
+- Installing from a result runs the same real Transfers path as everything else
 
-### What's New
-- `security`: a real advisory exists. Always recommend taking it
-- `safe`: the release is past a settle threshold with no advisories
-- A fresh release with no signal yet is labeled "new, little signal yet" rather than a confident verdict
-- Changelogs pulled from the source's GitHub releases
+### Transfers (execution, history, rollback)
+- **Real install, update, and rollback** commands with stdout and stderr streamed live into the active row, and success or failure shown from the actual exit code, not a fake progress bar
+- **Persistent history** of every install, update, and rollback with a timestamp and a from/to, so "what changed and when" is answerable
+- **Rollback** for npm (`npm i -g pkg@ver`) and pip (`pip install pkg==ver`). Homebrew is gated honestly, since it keeps no old bottles and cannot reliably downgrade
 
-### Aesthetic
+### Throughout
+- **Menu bar** (File / Edit / View / Swarm / Help): rescan, open the data folder, refresh registry caches, About, and the persisted View filters above
+- **Right-click context menus** on every meaningful row, with only the actions that apply (inapplicable ones greyed with a reason, never faked)
+- **Preferences**: a GitHub token (raises the API rate limit for changelogs and the wire) and per-source enable / disable toggles, persisted
+- **Export library** to JSON or Markdown
+
+### Packaging and updates
+- A **signed and notarized** macOS `.dmg` that opens cleanly with no Gatekeeper warning
+- An **in-app auto-updater** that checks on launch and offers the update, plus a manual check in the Help menu. Updates are minisign-signed and verified before they install
+- A **login-shell PATH capture** at startup so a Dock-launched app finds `npm`, `brew`, `pip`, and your manual tools, which a GUI app otherwise cannot
+
+### Aesthetic (real underneath)
 - Windows-98 beveled chrome and a VT323 wordmark
-- A dial-up connect splash on launch
-- Era-flavored "shared by" peer handles
-- A throttle slider that intentionally does nothing
+- A dial-up connect splash on launch that covers the first real scan
+- The npstr mark: a cat with a shipping box for a head, because a package manager should look like the package
+
+---
+
+## See It In Action
+
+**The menu bar and View filters** in motion: rescan, scope the library by source, sort, and toggle what shows:
+
+<p align="center">
+  <img src="docs/media/menu-bar.gif" alt="napm menu bar in action: opening the File, Edit, View, Swarm, and Help menus, toggling source filters, sorting the library, and rescanning" width="900" />
+</p>
+
+**What's New** scores every available update so you know whether to take it, and flags anything you have installed that is compromised:
+
+<p align="center">
+  <img src="docs/media/whats-new.png" alt="napm What's New feed: one card per available update with a safe / security / new verdict, the changelog, and the supply-chain wire of recent ecosystem advisories" width="900" />
+</p>
+
+**Search the swarm** hits the registries, sorted by weekly downloads as the trust signal, with a flame on the heavily-shared grabs:
+
+<p align="center">
+  <img src="docs/media/search.png" alt="napm Search results from npm and Homebrew sorted by weekly downloads, with flame markers on the most-downloaded packages and source-filter chips" width="900" />
+</p>
+
+**Transfers** is where versions actually change: real streamed install output and an honest exit code, with a rollback-able history:
+
+<p align="center">
+  <img src="docs/media/transfers.png" alt="napm Transfers tab showing a live install with streamed stdout and stderr, the exit code, and the persistent version-change history below" width="900" />
+</p>
+
+And the dial-up splash on launch, covering the first real scan:
+
+<p align="center">
+  <img src="docs/media/loading.png" alt="napm dial-up connect splash on launch, a Win98 dialog dialing the registry while the first scan runs" width="640" />
+</p>
 
 ---
 
@@ -94,53 +128,64 @@ All shell access and version logic live in a native Rust backend. The frontend n
 
 | Layer | Technology |
 |-------|-----------|
-| **Shell** | Tauri v2 (Rust), single native window, no Node runtime shipped |
-| **Backend** | Native Rust Tauri commands: scan, ops, registry, what's new, store |
-| **Frontend** | Vanilla HTML, CSS, and JS. The prototype is the UI, calling `invoke()` |
-| **Sources** | npm, Homebrew, pip, npx via `std::process::Command` |
-| **Network** | npm registry, formulae.brew.sh, PyPI, GitHub releases and advisories, cached aggressively |
-| **Persistence** | SQLite in the platform app-data directory: pins, history, registry caches |
-| **Platform** | macOS first |
+| **Shell** | Tauri v2 (Rust), a single native macOS window, no Node runtime shipped |
+| **Backend** | Native Rust Tauri commands: `scan`, `search`, `intel`, `ops`, `store`, `pathenv` |
+| **Frontend** | A single vanilla HTML / CSS / JS file calling `invoke()`. The prototype is the UI |
+| **Package sources** | npm, Homebrew, pip, npx via `std::process::Command`; manual installs via a `$PATH` sweep |
+| **Security intel** | OSV.dev (batched advisory scan), OpenSSF malicious-packages, GitHub global advisories |
+| **Network** | One process-wide keep-alive `ureq` agent to the npm registry, formulae.brew.sh, PyPI, GitHub, and OSV, cached aggressively in the app-data dir |
+| **Persistence** | Flat JSON in the platform app-data directory (`pins.json`, `history.json`, `settings.json`) plus tiered registry / advisory caches |
+| **Updates** | Tauri updater plugin, minisign-signed artifacts published on GitHub Releases |
+| **Signing** | Developer ID Application signature plus Apple notarization |
+| **Platform** | macOS, Apple silicon first |
 
 ---
 
 ## Architecture
 
+Two layers. A native Rust backend owns every shell call and all version logic and is the single source of truth. A vanilla-JS frontend is the Win98 UI and only ever calls `invoke()`.
+
 ```
-            +-------------------------------+
-            |   Tauri WebView (frontend)    |
-            |   Win98 chrome, vanilla JS    |
-            +---------------+---------------+
-                            | invoke()
-            +---------------+---------------+
-            |   Rust backend (Tauri cmds)   |
-            |   scan / ops / registry /     |
-            |   whatsnew / store            |
-            +---------------+---------------+
-                 std::process::Command + HTTP
-       +--------+--------+--------+--------+
-       |  npm   |  brew  |  pip   |  npx   |
-       +--------+--------+--------+--------+
-                            |
-                  +---------+---------+
-                  |  SQLite app-data  |
-                  | pins / history /  |
-                  |   caches          |
-                  +-------------------+
+              +-----------------------------------+
+              |     Tauri WebView (frontend)      |
+              |   Win98 chrome, one vanilla-JS    |
+              |   file, no shell access           |
+              +------------------+----------------+
+                                 |  invoke()
+              +------------------+----------------+
+              |        Rust backend (Tauri)       |
+              |  scan · search · intel · ops ·    |
+              |  store · pathenv                  |
+              +------------------+----------------+
+            std::process::Command         shared keep-alive HTTP
+        +--------+--------+--------+----+   +-----------------------+
+        |  npm   |  brew  |  pip   | npx|   | npm registry · PyPI · |
+        +--------+--------+--------+----+   | formulae.brew.sh ·    |
+        |     manual ($PATH sweep)     |   | GitHub · OSV.dev      |
+        +------------------------------+   +-----------------------+
+                                 |
+                       +---------+---------+        +------------------+
+                       |  JSON app-data    |        |  GitHub Releases |
+                       |  pins / history / |        |  signed updates  |
+                       |  settings + caches|        |  + latest.json   |
+                       +-------------------+        +------------------+
 ```
 
 ---
 
-## Quick Start
+## Install
 
-napm is a desktop app you build and run locally.
+### Download (recommended)
+
+Grab the signed, notarized `.dmg` from the [latest release](https://github.com/umzcio/napm/releases/latest), open it, and drag **napm** to Applications. It opens with no Gatekeeper warning and keeps itself up to date from then on.
+
+### Build from source
 
 **Prerequisites**
-- [Rust](https://rustup.rs) (stable) and a [Tauri v2 system setup](https://v2.tauri.app/start/prerequisites/)
+- [Rust](https://rustup.rs) (stable) and the [Tauri v2 system setup](https://v2.tauri.app/start/prerequisites/)
 - Node 18+ and npm
 - macOS (the only supported target today)
 
-**Run it**
 ```bash
 git clone https://github.com/umzcio/napm.git
 cd napm
@@ -150,9 +195,12 @@ npm install
 
 # build the Rust backend and launch the app
 npm run tauri dev
+
+# or build a release bundle (.app + .dmg)
+npm run tauri build
 ```
 
-The first launch compiles the Rust backend, so give it a minute. After that the dial-up splash plays and your real global npm tools fill the Shared Library.
+The first launch compiles the Rust backend, so give it a minute. After that the dial-up splash plays while your real installed tools fill the Shared Library.
 
 ---
 
@@ -161,50 +209,59 @@ The first launch compiles the Rust backend, so give it a minute. After that the 
 ```
 napm/
 ├── frontend/
-│   ├── index.html          # the whole UI: Win98 chrome + vanilla JS
-│   └── npstr-logo.svg
-├── src-tauri/              # native Rust backend
+│   ├── index.html              # the whole UI: Win98 chrome + vanilla JS
+│   ├── npstr-logo.svg
+│   └── vt323.ttf               # bundled font (no CDN at runtime)
+├── src-tauri/                  # native Rust backend
 │   ├── src/
-│   │   ├── lib.rs          # Tauri commands (scan_installed, ...)
-│   │   └── scan/           # one module per ecosystem
-│   │       ├── mod.rs      # InstalledTool + aggregation
-│   │       └── npm.rs      # npm scan + version merge (unit tested)
-│   ├── icons/              # generated from assets/npstr-logo.svg
+│   │   ├── lib.rs              # Tauri commands (scan_installed, run_op, ...)
+│   │   ├── pathenv.rs          # login-shell PATH capture at startup
+│   │   ├── http.rs             # one shared keep-alive HTTP agent
+│   │   ├── store.rs            # JSON store: pins / history / settings
+│   │   ├── ops.rs              # streamed install / update / rollback
+│   │   ├── scan/               # one module per source (npm/brew/pip/npx/manual)
+│   │   ├── search/             # federated registry search
+│   │   └── intel/              # OSV scan, supply-chain wire, release verdicts
+│   ├── icons/                  # generated from assets/npstr-logo.svg
 │   └── tauri.conf.json
-├── reference/scanner.js    # the original CLI, kept as a logic reference
-├── prototype/              # the canonical UX mock
-├── assets/npstr-logo.svg   # brand source
-└── docs/                   # specs and plans
+├── scripts/                    # signed-release + notarization helpers
+├── prototype/                  # the canonical UX mock, kept byte-identical to frontend/
+├── reference/scanner.js        # the original CLI, kept as a logic reference
+├── assets/npstr-logo.svg       # brand source
+└── docs/                       # specs, plans, and the living roadmap
 ```
 
 ---
 
 ## Design Decisions
 
-**Why a 90s file-sharing skin?** Because the metaphor is exact. A peer-to-peer client is a list of files, who has them, which copies are newer, and a queue of transfers. Swap "files" for "CLI tools" and you have a package manager. The bit is the skin. The substance underneath is a real, fast tool.
+**Why a 90s file-sharing skin?** Nostalgia, honestly. I wanted to recreate that late-90s peer-to-peer feel. It also turns out to be a near-perfect metaphor: a P2P client is a list of files, who has them, which copies are newer, and a queue of transfers. Swap "files" for "CLI tools" and you have a package manager. So the look is genuine homage, and every element that reads as flavor still carries real data underneath.
 
 **Why Tauri and native Rust?** napm needs privileged shell access to run npm, brew, and pip, which rules out a pure browser app. Tauri gives a tiny single-binary native window, and keeping every shell call and all version logic in Rust means there is exactly one source of truth and the frontend can never shell out.
 
-**Why downloads-per-week as the trust signal?** In a registry the heavily downloaded package is usually the safe grab. Sorting search by popularity turns a vanity metric into a recommendation, and the flame marker just makes the loud signal visible.
+**Why capture the login-shell PATH at startup?** A GUI app launched from the Dock does not inherit your shell PATH, it gets a bare `/usr/bin:/bin:/usr/sbin:/sbin`. Without capturing the real PATH first, a packaged napm would find none of your tools. It runs your login shell once at startup, reads its PATH, and sets it before anything spawns.
 
-**Why be honest about pip and brew?** PyPI has no search API and Homebrew keeps no old bottles. Pretending otherwise would mean fuzzy pip search that returns nothing and a rollback button that always fails. napm surfaces the limit in the UI instead of papering over it.
+**Why scan everything for advisories, not just outdated tools?** A vulnerability in the version you are holding matters whether or not a newer one exists. The OSV scan runs over your entire installed set at its current versions, so "is anything I have compromised" is answered independently of "what can I update."
 
----
+**Why classify severity from the advisory id instead of fetching details up front?** Speed. The malicious-versus-vulnerable call comes from the OSV id prefix, so the feed loads fast over a hundred-plus packages; the full advisory detail loads lazily when you expand a card.
 
-## Roadmap
+**Why downloads-per-week as the trust signal?** In a registry the heavily downloaded package is usually the safe grab. Sorting search by popularity turns a vanity metric into a recommendation, and the flame marker makes the loud signal visible.
 
-Built in vertical slices, each one a working app on its own.
+**Why be honest about pip, brew, and manual installs?** PyPI has no search API, Homebrew keeps no old bottles, and manual installs have no registry or uniform updater. Pretending otherwise would mean fuzzy pip search that returns nothing, a rollback button that always fails, and a fake update path for tools that have none. napm surfaces each limit in the UI instead of papering over it.
 
-- [x] **M1** Tauri shell plus a real npm Shared Library scan
-- [ ] **M2** brew, pip, and npx scans
-- [ ] **M3** Transfers: streamed installs, history store, rollback for npm and pip, brew gated, npx promote
-- [ ] **M4** Search the swarm: npm, the cached brew index, pip exact lookup
-- [ ] **M5** What's New: changelogs plus safe and security verdicts
-- [ ] **M6** A packaged macOS app
+**Why a real publisher in "Shared By" instead of fake peer handles?** Early mockups used invented peer names for flavor. The rule the project settled on is that every element is real, so the column shows the package's actual publisher, derived from offline metadata. The joke is the interface, not the information.
 
-Deferred on purpose: the `hold` issue-velocity verdict, npx usage-frequency intelligence, and cross-platform support.
+**Why flat JSON instead of SQLite?** The persisted data is small: a set of pins, a history log, and a settings object. A few JSON files in the app-data directory are simpler, inspectable, and trivially debuggable, with no schema migrations to run.
 
 ---
+
+## Naming and legal
+
+napm stands for **n**pstr **A**I **P**ackage **M**anager. The late-90s file-sharing styling is homage and parody. The original brand name is never used, and none of its logo or trade dress is reproduced. napm's mark is its own original artwork, a cat with a shipping box for a head. Homage, not affiliation.
+
+## Contributing
+
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to set up a local build, the project conventions, and how to report a security issue responsibly.
 
 ## License
 
@@ -213,6 +270,6 @@ Deferred on purpose: the `hold` issue-velocity verdict, npx usage-frequency inte
 ---
 
 <p align="center">
-  <em>Connected at 56.6 kbps. 4,182,007 peers online.</em><br/>
-  <sub>throttle slider purely decorative, like it always was</sub>
+  <em>Connected at 56.6 kbps. The swarm is large, and the throttle finally does something.</em><br/>
+  <sub>npstr AI Package Manager. Your tools, shared.</sub>
 </p>
