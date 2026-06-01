@@ -42,7 +42,7 @@ function** (no decorative jokes).
   One "Find It!" search hits the whole swarm at once; results merge into one flat
   list sorted by weekly downloads (the trust signal), flame marker on the
   heavily-shared ones. Source chips (all / npm / brew / pip) default to all and
-  narrow the view client-side, mapping to Napster's optional filter dropdowns.
+  narrow the view client-side, echoing the era's optional filter dropdowns.
   npm uses the registry search + downloads API; brew searches a cached formula
   catalog joined with 30-day analytics; pip is exact-name PyPI lookup only,
   tagged "exact match" so the gap is visible. Each source fails independently so
