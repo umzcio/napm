@@ -39,10 +39,13 @@
     align-self:flex-end; padding-bottom:3px; margin-left:-2px; letter-spacing:.5px;}
   .titlebar .title{font-weight:bold; font-size:11px;}
   .titlebar .spacer{flex:1;}
-  .tb-btn{width:16px; height:14px; background:var(--face); display:flex;
+  .tb-btn{width:16px; height:14px; background:var(--face); color:#000; display:flex;
     align-items:center; justify-content:center; font-size:10px; font-weight:bold; cursor:pointer;
+    font-family:Tahoma,"MS Sans Serif",Geneva,sans-serif; line-height:1;
     box-shadow:inset -1px -1px #0a0a0a, inset 1px 1px var(--white),
                inset -2px -2px var(--dgray), inset 2px 2px var(--lgray);}
+  .tb-btn:active{box-shadow:inset 1px 1px #0a0a0a, inset -1px -1px var(--white),
+               inset 2px 2px var(--dgray), inset -2px -2px var(--lgray);}
 
   .menubar{display:flex; gap:2px; padding:2px 1px; flex:0 0 auto;}
   .menubar span{padding:2px 7px; cursor:default;}
@@ -209,7 +212,7 @@
     <img class="brand" src="npstr-logo.svg" alt="npstr" data-tauri-drag-region><span class="logo" data-tauri-drag-region>napm</span><span class="ver" id="appVer" data-tauri-drag-region></span>
     <span class="title" data-tauri-drag-region>- npstr AI Package Manager [Shared Library]</span>
     <span class="spacer" data-tauri-drag-region></span>
-    <span class="tb-btn" id="tb-min" title="Minimize">_</span><span class="tb-btn" id="tb-max" title="Maximize">▢</span><span class="tb-btn" id="tb-close" title="Close">✕</span>
+    <span class="tb-btn" id="tb-min" title="Minimize">_</span><span class="tb-btn" id="tb-max" title="Maximize">□</span><span class="tb-btn" id="tb-close" title="Close">✕</span>
   </div>
 
   <div class="menubar" id="menubar">
