@@ -320,6 +320,7 @@
     malicious:["☠ Compromised: act now","malicious"],
     security:["🛡 Update (security)","security"],
     safe:["✓ Safe to take","safe"],
+    hold:["⚠ Hold: let it settle","hold"],
     "new":["○ New, little signal yet","new"],
     unknown:["○ no release signal","new"]
   };
@@ -542,7 +543,7 @@
       });
       (r.verdicts||[]).forEach(function(v){
         var ti=findToolIdx(v.pkg, v.eco);
-        feed.push({ti:ti, pkg:v.pkg, eco:v.eco, rec:v.recommendation,
+        feed.push({ti:ti, pkg:v.pkg, eco:v.eco, rec:v.recommendation, reason:v.reason||"",
           age:v.ageLabel||"signal unknown", blurb:reBlurb(v), changelog:[], loaded:false,
           signals:[], fix:null, link:""});
       });
@@ -552,6 +553,7 @@
   }
   function reBlurb(v){
     if(v.recommendation==="safe") return "Settled release, no advisories. Safe to take.";
+    if(v.recommendation==="hold") return v.reason ? ("Fresh release: "+v.reason+". Consider waiting.") : "Fresh release showing elevated issue activity. Consider waiting.";
     if(v.recommendation==="new") return "Fresh release with little signal yet. Your call.";
     if(v.recommendation==="unknown") return "No release-age signal available for this source.";
     return "No release-age signal available for this source.";
