@@ -849,6 +849,7 @@
   // load instead of fading on a fixed timer over a still-empty window.
   function nextStep(){ if(si>=steps.length) return; sBody.innerHTML=steps.slice(0,si+1).join('<br>'); si++; setTimeout(nextStep,560); }
 
+  var DID_UPDATE_CHECK=false;
   function scanLibrary(){
     var inv = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
     if(!inv){ renderRows(); FEED_LOADED=false; loadWhatsNew(); renderStatus(); dismissSplash(); return; }
@@ -856,6 +857,8 @@
       TOOLS = tools || [];
       selected=null; // the old index no longer maps into the rebuilt list
       renderRows(); FEED_LOADED=false; loadWhatsNew(); renderStatus(); dismissSplash();
+      // Once per session, after the UI settles, check for an app update unobtrusively.
+      if(!DID_UPDATE_CHECK){ DID_UPDATE_CHECK=true; setTimeout(function(){ checkForUpdate(false); }, 1200); }
     }).catch(function(e){ console.error("scan_installed failed", e); renderRows(); FEED_LOADED=false; loadWhatsNew(); renderStatus(); dismissSplash(); });
   }
   // Update appetite dial: load saved level, label it, re-classify live on drag.
@@ -956,6 +959,7 @@
     ],
     help: [
       {label:"About napm", run:function(){ if(window.showAbout) showAbout(); }},
+      {label:"Check for updates...", run:function(){ checkForUpdate(true); }},
       {label:"Repo on GitHub", run:function(){ var i=inv(); if(i) i("open_external",{url:"https://github.com/umzcio/napm"}); }}
     ]
   };
@@ -1064,10 +1068,45 @@
       if(i) i("set_settings",{settings:settings}).then(after).catch(after); else after();
       return;
     }
+    if(e.target.hasAttribute("data-update-now")){
+      var msg=document.getElementById("updMsg"); if(msg) msg.textContent="Downloading update...";
+      var i=inv();
+      if(i) i("install_update").catch(function(err){ if(msg) msg.textContent="Update failed: "+err+". Try again later."; });
+      return;
+    }
     if(e.target.id==="modalBack" || e.target.hasAttribute("data-close")) { closeModal(); return; }
     if(e.target.hasAttribute("data-repo")){ e.preventDefault(); var i=inv(); if(i) i("open_external",{url:"https://github.com/umzcio/napm"}); }
   });
   // (Escape handling is unified with the menu handler above, layering menu over modal.)
+
+  // ---- UPDATER -----------------------------------------------------------
+  var UPDATE_CHECKING=false;
+  function showUpdateModal(u){
+    var box=document.getElementById("modalBox");
+    box.innerHTML='<div class="m-h">Update available<span class="x" data-close>×</span></div>'+
+      '<div class="m-b"><div><b>napm v'+esc(u.version)+'</b> is available.</div>'+
+      (u.notes?'<div class="muted" style="margin-top:6px;white-space:pre-wrap">'+esc(u.notes)+'</div>':'')+
+      '<div id="updMsg" style="margin-top:8px"></div>'+
+      '<div style="margin-top:12px;text-align:right"><button class="btn" data-close>Later</button> '+
+      '<button class="btn primary" data-update-now>Update now</button></div></div>';
+    document.getElementById("modalBack").style.display="flex";
+  }
+  function showUpToDate(){
+    var box=document.getElementById("modalBox");
+    box.innerHTML='<div class="m-h">Check for updates<span class="x" data-close>×</span></div>'+
+      '<div class="m-b"><div>You are up to date ('+esc(window.__appVer||"")+').</div>'+
+      '<div style="margin-top:12px;text-align:right"><button class="btn" data-close>OK</button></div></div>';
+    document.getElementById("modalBack").style.display="flex";
+  }
+  function checkForUpdate(manual){
+    var i=inv(); if(!i || UPDATE_CHECKING) return;
+    UPDATE_CHECKING=true;
+    i("check_for_update").then(function(u){
+      UPDATE_CHECKING=false;
+      if(u) showUpdateModal(u);
+      else if(manual) showUpToDate();
+    }).catch(function(){ UPDATE_CHECKING=false; if(manual) showUpToDate(); });
+  }
 
   function setAppVersion(){
     var app=window.__TAURI__&&window.__TAURI__.app;
