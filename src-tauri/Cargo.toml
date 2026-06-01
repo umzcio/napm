@@ -1,6 +1,6 @@
 [package]
 name = "napm"
-version = "0.1.2"
+version = "0.1.3"
 description = "napm: a desktop package manager for command-line dev tools"
 authors = ["umzcio <umzcio@users.noreply.github.com>"]
 license = "MIT"
