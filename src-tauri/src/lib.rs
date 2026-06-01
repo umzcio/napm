@@ -165,13 +165,54 @@ fn clear_caches(app: tauri::AppHandle) {
     });
 }
 
+/// Minimal update metadata sent to the frontend. Empty strings where unknown.
+#[derive(serde::Serialize)]
+struct UpdateMeta {
+    version: String,
+    notes: String,
+    #[serde(rename = "pubDate")]
+    pub_date: String,
+}
+
+/// Check the release feed for a newer signed version. Returns None on no update
+/// OR any failure (a failed check never blocks or fabricates an update).
+#[tauri::command(async)]
+async fn check_for_update(app: tauri::AppHandle) -> Option<UpdateMeta> {
+    use tauri_plugin_updater::UpdaterExt;
+    let update = app.updater().ok()?.check().await.ok()??;
+    Some(UpdateMeta {
+        version: update.version.clone(),
+        notes: update.body.clone().unwrap_or_default(),
+        pub_date: update.date.map(|d| d.to_string()).unwrap_or_default(),
+    })
+}
+
+/// Download, verify (against the baked-in pubkey), install, and relaunch.
+/// Returns an honest error string on any failure; never a silent partial install.
+#[tauri::command(async)]
+async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let update = app
+        .updater()
+        .map_err(|e| e.to_string())?
+        .check()
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "no update available".to_string())?;
+    update
+        .download_and_install(|_chunk, _total| {}, || {})
+        .await
+        .map_err(|e| e.to_string())?;
+    app.restart();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   // Capture the real login-shell PATH before anything spawns, so a Dock/Finder
   // launch can find npm/brew/pip and the manual scanner can walk a real $PATH.
   pathenv::fix_path();
   tauri::Builder::default()
-    .invoke_handler(tauri::generate_handler![scan_installed, set_pin, get_history, run_op, search_registry, get_whats_new, get_changelog, get_advisory, open_data_dir, open_external, clear_caches, get_settings, set_settings, export_library, reveal_in_finder])
+    .invoke_handler(tauri::generate_handler![scan_installed, set_pin, get_history, run_op, search_registry, get_whats_new, get_changelog, get_advisory, open_data_dir, open_external, clear_caches, get_settings, set_settings, export_library, reveal_in_finder, check_for_update, install_update])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -180,6 +221,7 @@ pub fn run() {
             .build(),
         )?;
       }
+      app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
       // Warm the brew catalog in the background so the first search is not cold.
       // Best-effort: never block startup on the network.
       let dir = app
