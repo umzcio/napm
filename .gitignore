@@ -21,3 +21,6 @@ napm.zip
 
 # Playwright MCP scratch output
 .playwright-mcp/
+
+# Updater manifest is a release artifact, not committed
+/latest.json

@@ -1,0 +1,14 @@
+# Copy to scripts/.notary-config.local (gitignored) and fill in.
+# Reuse the same App Store Connect API key as zMeet/zMD.
+
+# Developer ID Application identity (already in the keychain)
+export APPLE_SIGNING_IDENTITY="Developer ID Application: The University of Montana (5JJ6G6A84S)"
+
+# App Store Connect API key for notarization
+export APPLE_API_KEY_PATH="$HOME/Downloads/AuthKey_XXXXXXXXXX.p8"
+export APPLE_API_KEY="XXXXXXXXXX"          # Key ID
+export APPLE_API_ISSUER="00000000-0000-0000-0000-000000000000"  # Issuer UUID
+
+# Tauri updater signing key (generated once; see the release runbook)
+export TAURI_SIGNING_PRIVATE_KEY="$HOME/.napm/napm-updater.key"
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""   # if the key was password-protected
