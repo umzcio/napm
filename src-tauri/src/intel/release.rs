@@ -57,6 +57,29 @@ pub fn age_verdict(published: Option<i64>, now: i64) -> (String, String) {
     (rec.to_string(), label)
 }
 
+/// Decide whether a fresh release should be held, from GitHub issue counts.
+/// Pure and unit-testable. `recent` = issues opened since the release,
+/// `baseline` = issues opened in the 90 days before it, `days_since` = days the
+/// release has been out (floored at 1). Returns Some(multiple) when it should
+/// hold (>= 2x the daily baseline AND at least 3 new issues, with a real prior
+/// baseline), else None.
+pub fn velocity_hold(recent: u64, baseline: u64, days_since: i64) -> Option<u64> {
+    if recent < 3 {
+        return None;
+    }
+    let baseline_daily = baseline as f64 / 90.0;
+    if baseline_daily <= 0.0 {
+        return None;
+    }
+    let recent_daily = recent as f64 / days_since.max(1) as f64;
+    let mult = recent_daily / baseline_daily;
+    if mult >= 2.0 {
+        Some(mult.round() as u64)
+    } else {
+        None
+    }
+}
+
 /// Extract (owner, repo) from a GitHub URL in any common form
 /// (git+https://github.com/owner/repo.git, https://github.com/owner/repo, etc).
 pub fn github_repo_from_url(url: &str) -> Option<(String, String)> {
@@ -244,6 +267,22 @@ mod tests {
         // Exactly 8 days is "safe".
         let (rec8, _) = age_verdict(Some(now - 8 * 86400), now);
         assert_eq!(rec8, "safe");
+    }
+
+    #[test]
+    fn velocity_hold_decisions() {
+        // Clear spike: 20 issues in 2 days (10/day) vs 0.1/day baseline -> hold.
+        assert_eq!(velocity_hold(20, 9, 2), Some(100));
+        // Exactly 2x with >=3 issues -> hold, multiple 2.
+        assert_eq!(velocity_hold(6, 270, 1), Some(2));
+        // Below 2x -> none. 10/day vs 10/day baseline.
+        assert_eq!(velocity_hold(10, 900, 1), None);
+        // Absolute floor: fewer than 3 new issues -> none.
+        assert_eq!(velocity_hold(2, 0, 1), None);
+        // No prior issue history (baseline 0) -> none (insufficient signal).
+        assert_eq!(velocity_hold(5, 0, 1), None);
+        // days_since is floored at 1 (never divide by zero).
+        assert_eq!(velocity_hold(6, 270, 0), Some(2));
     }
 
     #[test]
