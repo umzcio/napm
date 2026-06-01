@@ -27,3 +27,7 @@ napm.zip
 
 # Internal planning artifacts (specs/plans) - kept local, not in the repo
 docs/superpowers/
+
+# Internal-only: AI brief and the byte-identical UX mirror of frontend/index.html
+/CLAUDE.md
+/prototype/

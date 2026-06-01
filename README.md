@@ -130,7 +130,7 @@ And the dial-up splash on launch, covering the first real scan:
 |-------|-----------|
 | **Shell** | Tauri v2 (Rust), a single native macOS window, no Node runtime shipped |
 | **Backend** | Native Rust Tauri commands: `scan`, `search`, `intel`, `ops`, `store`, `pathenv` |
-| **Frontend** | A single vanilla HTML / CSS / JS file calling `invoke()`. The prototype is the UI |
+| **Frontend** | A single vanilla HTML / CSS / JS file (`frontend/index.html`) calling `invoke()` |
 | **Package sources** | npm, Homebrew, pip, npx via `std::process::Command`; manual installs via a `$PATH` sweep |
 | **Security intel** | OSV.dev (batched advisory scan), OpenSSF malicious-packages, GitHub global advisories |
 | **Network** | One process-wide keep-alive `ureq` agent to the npm registry, formulae.brew.sh, PyPI, GitHub, and OSV, cached aggressively in the app-data dir |
@@ -235,10 +235,9 @@ napm/
 │   ├── icons/                  # generated from assets/npstr-logo.svg
 │   └── tauri.conf.json
 ├── scripts/                    # signed-release + notarization helpers
-├── prototype/                  # the canonical UX mock, kept byte-identical to frontend/
 ├── reference/scanner.js        # the original CLI, kept as a logic reference
 ├── assets/npstr-logo.svg       # brand source
-└── docs/                       # specs, plans, and the living roadmap
+└── docs/                       # the living roadmap and media
 ```
 
 ---
