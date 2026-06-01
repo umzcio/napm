@@ -263,7 +263,16 @@ Hard-won lessons (carry into M10b):
 - The bundled process is named `app` (the Cargo crate name), not `napm` - matters
   for any process/cache management scripts. Consider renaming the crate.
 
-### M10b - Distributable & self-updating
+### M10b - Distributable & self-updating (Built, awaiting public flip)
+
+Implementation is complete and verified locally. The Tauri updater plugin is
+wired (check on launch + Help menu, signature-verified install), and a signed +
+notarized + stapled v0.1.0 build (both the `.app` and the `.dmg` are
+`Notarized Developer ID`, Gatekeeper accepted) is published as the `v0.1.0`
+release with `latest.json` + `napm.app.tar.gz`. The baked-in updater pubkey
+matches the signing key. The git history is secret-clean. Two steps remain and
+are gated on owner approval: flipping the repo public, and the live updater
+end-to-end test (0.1.0 -> 0.1.1), which needs the public release endpoint.
 
 A notarized `.dmg` that opens cleanly anywhere, plus in-app updates, published
 on a now-public GitHub repo. Reuses the signing/notarization setup proven in
