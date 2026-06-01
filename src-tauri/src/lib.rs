@@ -128,6 +128,27 @@ fn open_external(url: String) {
     }
 }
 
+#[derive(serde::Serialize)]
+struct NpxLatest {
+    pkg: String,
+    latest: String,
+}
+
+/// For each npx package name, resolve the registry `dist-tags.latest` (the
+/// version npx fetches on the next `@latest` run). Best-effort: unresolved
+/// packages are omitted. Used by the frontend to show a drift hint on npx rows.
+#[tauri::command(async)]
+fn npx_latest(pkgs: Vec<String>) -> Vec<NpxLatest> {
+    pkgs.into_iter()
+        .filter_map(|pkg| {
+            let url = format!("https://registry.npmjs.org/{}", http::encode(&pkg));
+            let body = http::get(&url).ok()?;
+            let latest = scan::npx::parse_dist_tag_latest(&body)?;
+            Some(NpxLatest { pkg, latest })
+        })
+        .collect()
+}
+
 /// Reveal and select a path in Finder (`open -R`). Validates the path exists so
 /// a stale entry never shells an arbitrary string. No-op on a missing path.
 #[tauri::command(async)]
@@ -212,7 +233,7 @@ pub fn run() {
   // launch can find npm/brew/pip and the manual scanner can walk a real $PATH.
   pathenv::fix_path();
   tauri::Builder::default()
-    .invoke_handler(tauri::generate_handler![scan_installed, set_pin, get_history, run_op, search_registry, get_whats_new, get_changelog, get_advisory, open_data_dir, open_external, clear_caches, get_settings, set_settings, export_library, reveal_in_finder, check_for_update, install_update])
+    .invoke_handler(tauri::generate_handler![scan_installed, set_pin, get_history, run_op, search_registry, get_whats_new, get_changelog, get_advisory, open_data_dir, open_external, clear_caches, get_settings, set_settings, export_library, reveal_in_finder, check_for_update, install_update, npx_latest])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(

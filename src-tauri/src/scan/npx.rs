@@ -3,6 +3,12 @@ use std::collections::BTreeMap;
 use std::fs;
 use serde_json::Value;
 
+/// npm registry doc -> `dist-tags.latest`, the version npx resolves for `@latest`.
+pub fn parse_dist_tag_latest(json: &str) -> Option<String> {
+    let v: Value = serde_json::from_str(json).ok()?;
+    v.get("dist-tags")?.get("latest")?.as_str().map(String::from)
+}
+
 /// Strip the trailing `@version` from an npx package spec, preserving scoped
 /// names. "pkg@1.2.3" -> "pkg"; "@scope/pkg@1.2.3" -> "@scope/pkg".
 pub fn npx_pkg_name(spec: &str) -> &str {
@@ -136,6 +142,14 @@ mod tests {
     #[test]
     fn plain_name_without_version_is_unchanged() {
         assert_eq!(npx_pkg_name("eslint"), "eslint");
+    }
+
+    #[test]
+    fn reads_dist_tag_latest() {
+        let doc = r#"{"dist-tags":{"latest":"5.6.2","next":"6.0.0-beta"},"name":"typescript"}"#;
+        assert_eq!(parse_dist_tag_latest(doc), Some("5.6.2".to_string()));
+        assert_eq!(parse_dist_tag_latest("not json"), None);
+        assert_eq!(parse_dist_tag_latest(r#"{"dist-tags":{}}"#), None);
     }
 
     #[test]
