@@ -26,10 +26,12 @@ def render(scale, path):
     small = ImageFont.truetype(FONT, 17 * scale)
     d.text((20 * scale, 8 * scale), "npstr :: napm", font=big, fill=WHITE)
     d.text((20 * scale, 64 * scale), "drag napm into Applications to install", font=small, fill=INK)
-    # Arrow from the app icon (left ~165) to Applications (right ~495), centered.
+    # Arrow centered in the gap between the icons. Icons sit at x=165 and x=495
+    # (each ~128px wide), so the clear gap is roughly x=229..431. Keep the whole
+    # arrow inside it so the head does not overlap the Applications folder.
     y = 250 * scale
-    d.line([235 * scale, y, 415 * scale, y], fill=GREEN, width=6 * scale)
-    d.polygon([(415 * scale, y - 16 * scale), (455 * scale, y), (415 * scale, y + 16 * scale)], fill=GREEN)
+    d.line([245 * scale, y, 390 * scale, y], fill=GREEN, width=6 * scale)
+    d.polygon([(390 * scale, y - 15 * scale), (415 * scale, y), (390 * scale, y + 15 * scale)], fill=GREEN)
     img.save(path)
     print("wrote", path)
 
