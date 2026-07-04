@@ -7,8 +7,8 @@
 </p>
 
 <p align="center">
-  <strong>The desktop package manager that thinks it is a 1999 file-sharing client.</strong><br/>
-  Track every command-line dev tool you have across npm, Homebrew, pip, npx, and manual installs. See what is outdated, whether the update is safe to take, whether anything you are holding is compromised, and roll back when an update goes wrong.<br/><br/>
+  <strong>napm is the npstr AI Package Manager: the desktop package manager that thinks it is a 1999 file-sharing client.</strong><br/>
+  Track and update every command-line dev tool you have across npm, Homebrew, pip, npx, and manual installs, in one place. See what is outdated, whether the update is safe to take, whether anything you are holding is compromised, and roll back when an update goes wrong.<br/><br/>
   Your CLIs are the files. The registry is the swarm. Updating is a download.
 </p>
 
@@ -21,7 +21,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/status-v0.1.0-3A32FF?style=flat-square" alt="v0.1.0" />
+  <img src="https://img.shields.io/github/v/release/umzcio/napm?style=flat-square&color=3A32FF&label=release" alt="Latest release" />
   <img src="https://img.shields.io/badge/license-MIT-3A32FF?style=flat-square" alt="MIT" />
   <img src="https://img.shields.io/badge/stack-Tauri%202%20%7C%20Rust%20%7C%20Vanilla%20JS-6A1BFF?style=flat-square" alt="Stack" />
   <img src="https://img.shields.io/badge/sources-npm%20%7C%20brew%20%7C%20pip%20%7C%20npx%20%7C%20manual-1B5CFF?style=flat-square" alt="Sources" />
