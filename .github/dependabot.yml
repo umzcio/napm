@@ -1,0 +1,23 @@
+version: 2
+updates:
+  # Rust backend: tauri, ureq, serde, and the rest of src-tauri
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    schedule:
+      interval: weekly
+    groups:
+      cargo-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # Root package.json: the Tauri CLI dev tooling
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      npm-minor-and-patch:
+        update-types:
+          - minor
+          - patch
