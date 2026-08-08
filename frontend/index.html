@@ -705,8 +705,9 @@
     if(!xfers.length){ xferListEl.innerHTML='<div class="empty">Nothing transferring.</div>'; }
     else{ xferListEl.innerHTML="";
       xfers.forEach(function(x,xi){
-        var d=document.createElement("div"); d.className="xfer-row raised"; d.dataset.i=xi;
-        var body=x.lines.map(function(l){ return '<span class="'+(l.stream==="stderr"?"err":"")+'">'+esc(l.line)+'</span>'; }).join("\n");
+        var d=document.createElement("div"); d.className="xfer-row raised"; d.dataset.i=xi; d.dataset.op=x.opId;
+        var body=(x.trimmed?'<span class="muted">earlier output trimmed</span>\n':'')+
+          x.lines.map(function(l){ return '<span class="'+(l.stream==="stderr"?"err":"")+'">'+esc(l.line)+'</span>'; }).join("\n");
         var stat=x.done?('<div class="xstat '+(x.ok?"ok":"fail")+'">'+(x.ok?"✓ complete":"✗ failed")+'</div>'):"";
         d.innerHTML='<div class="xfer-top"><div class="name">'+esc(x.name)+'</div><div class="from">@'+esc(x.user)+'</div>'+
           '<div class="kbps">'+(x.done?(x.ok?"done":"error"):"running")+'</div></div>'+
@@ -778,7 +779,13 @@
     var opId="op"+(++opSeq);
     var x={opId:opId,eco:t.eco,pkg:t.pkg,name:t.name,user:t.publisher||"unknown",cmd:cmd,lines:[],done:false,ok:false,
            action:action,from:from,to:target};
-    xfers.unshift(x); renderXfers();
+    xfers.unshift(x);
+    // Retention: keep every in-flight transfer, but cap completed ones to the
+    // 50 most recent so a long session doesn't grow xfers (and its per-row
+    // accumulated logs) without bound.
+    var doneSeen=0;
+    xfers=xfers.filter(function(z){ if(!z.done) return true; doneSeen++; return doneSeen<=50; });
+    renderXfers();
     var iv=inv();
     if(!iv){ x.done=true; x.ok=false; x.lines.push({stream:"stderr",line:"(not running in napm)"}); renderXfers(); return; }
     // run_op has its own event-driven feedback (transfer-line/transfer-done),
@@ -942,7 +949,18 @@
     if(!ev) return;
     ev.listen("transfer-line",function(e){
       var x=xfers.find(function(z){return z.opId===e.payload.op_id;});
-      if(x){ x.lines.push({stream:e.payload.stream,line:e.payload.line}); renderXfers(); }
+      if(!x) return;
+      x.lines.push({stream:e.payload.stream,line:e.payload.line});
+      if(x.lines.length>500){ x.lines.shift(); x.trimmed=true; }
+      var xout=xferListEl.querySelector('[data-op="'+x.opId+'"] .xout');
+      if(!xout){ renderXfers(); return; }
+      var atBottom = xout.scrollTop + xout.clientHeight >= xout.scrollHeight - 4;
+      if(xout.childNodes.length){ xout.appendChild(document.createTextNode("\n")); }
+      var span=document.createElement("span");
+      if(e.payload.stream==="stderr") span.className="err";
+      span.textContent=e.payload.line;
+      xout.appendChild(span);
+      if(atBottom){ xout.scrollTop=xout.scrollHeight; }
     });
     ev.listen("transfer-done",function(e){
       var x=xfers.find(function(z){return z.opId===e.payload.op_id;});
