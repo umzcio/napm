@@ -433,10 +433,7 @@ mod tests {
     #[test]
     fn display_command_uses_the_resolved_pip_binary() {
         let args = vec!["install".to_string(), "httpie==3.2.2".to_string()];
-        assert_eq!(
-            display_command("pip3", &args),
-            "pip3 install httpie==3.2.2"
-        );
+        assert_eq!(display_command("pip3", &args), "pip3 install httpie==3.2.2");
     }
 
     #[test]

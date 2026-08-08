@@ -360,6 +360,18 @@
   function setSort(k){ VIEW.sort=k; saveView(); renderRows(); }
   function toggleView(k){ VIEW[k]=!VIEW[k]; saveView(); renderRows(); }
   function toggleSource(s){ VIEW.sources[s]=!VIEW.sources[s]; saveView(); renderRows(); }
+  // Preferences' Sources checkboxes (settings.json, backend scan gating) are a
+  // separate control from the View menu's "Show: X" filters (napm.view,
+  // client-side display only). SETTINGS caches the former so the View menu can
+  // grey out a filter that can never show anything because the source is not
+  // scanned at all. Loaded once at startup and refreshed on Preferences save.
+  var SETTINGS = { sources:{npm:true,brew:true,pip:true,npx:true,manual:true} };
+  function loadSettings(){
+    var i=inv(); if(!i) return;
+    i("get_settings").then(function(s){ if(s) SETTINGS=s; }).catch(function(){});
+  }
+  function sourceScanDisabled(s){ return !!(SETTINGS.sources && SETTINGS.sources[s]===false); }
+  function sourceMenuLabel(s){ return "Show: "+s+(sourceScanDisabled(s)?" (off in Preferences)":""); }
   function sizeBytes(s){ var m=/([\d.]+)\s*([KMGT]?B)?/i.exec(s||""); if(!m) return 0; var n=parseFloat(m[1])||0; var u=(m[2]||"B").toUpperCase(); var mul={B:1,KB:1e3,MB:1e6,GB:1e9,TB:1e12}[u]||1; return n*mul; }
   function statusRank(t){ var s=statusOf(t); return s==="update"?0:s==="offline"?1:s==="unmanaged"?3:2; }
 
@@ -631,6 +643,8 @@
       f.appendChild(card);
     });
   }
+  // Clipboard/hint helper only (the malicious-card "what this would run" text) -
+  // never actually executed, so it does not need to track the backend's real argv.
   function removeCmd(it){
     if(it.eco==="npm"||it.eco==="npx") return "npm rm -g '"+it.pkg+"'";
     if(it.eco==="pip") return "pip uninstall '"+it.pkg+"'";
@@ -642,6 +656,9 @@
     if(eco==="pip") return "https://pypi.org/project/"+pkg+"/";
     return null;
   }
+  // Clipboard helper only (the "Copy install command" menu item's preview
+  // text) - never actually executed, so it does not need to track the
+  // backend's real argv (e.g. the pip/pip3 resolution).
   function installCmd(eco, pkg, version){
     if(eco==="pip") return "pip install "+pkg+(version?"=="+version:"");
     if(eco==="brew") return "brew install "+pkg;
@@ -771,12 +788,11 @@
     var dup=xfers.find(function(z){ return !z.done && z.pkg===t.pkg && z.eco===t.eco; });
     if(dup){ switchTab("transfers"); return; }
     var from=t.installed;
-    var cmd=(t.eco==="npm"?"npm i -g "+t.pkg+"@"+target
-           :t.eco==="pip"?"pip install "+t.pkg+"=="+target
-           :t.eco==="brew"?"brew install "+t.pkg
-           :"npm i -g "+t.pkg);
+    // cmd starts empty and is filled in from the backend's own first
+    // transfer-line ("$ <prog> <args>") once the op actually runs, so the
+    // row shows the command that really executed instead of a guess.
     var opId="op"+(++opSeq);
-    var x={opId:opId,eco:t.eco,pkg:t.pkg,name:t.name,user:t.publisher||"unknown",cmd:cmd,lines:[],done:false,ok:false,
+    var x={opId:opId,eco:t.eco,pkg:t.pkg,name:t.name,user:t.publisher||"unknown",cmd:"",lines:[],done:false,ok:false,
            action:action,from:from,to:target};
     xfers.unshift(x);
     // Retention: keep every in-flight transfer, but cap completed ones to the
@@ -951,6 +967,15 @@
     ev.listen("transfer-line",function(e){
       var x=xfers.find(function(z){return z.opId===e.payload.op_id;});
       if(!x) return;
+      // The backend's first line for a real op is "$ <the command that ran>".
+      // Route it into the row header (x.cmd), not the log body: skip both the
+      // lines[] push and the .xout append so it is not shown twice.
+      if(!x.cmd && e.payload.stream==="stdout" && e.payload.line.indexOf("$ ")===0){
+        x.cmd=e.payload.line.slice(2);
+        var cmdEl=xferListEl.querySelector('[data-op="'+x.opId+'"] .cmd');
+        if(cmdEl) cmdEl.textContent="$ "+x.cmd; else renderXfers();
+        return;
+      }
       x.lines.push({stream:e.payload.stream,line:e.payload.line});
       if(x.lines.length>500){ x.lines.shift(); x.trimmed=true; }
       var xout=xferListEl.querySelector('[data-op="'+x.opId+'"] .xout');
@@ -1057,11 +1082,11 @@
       {label:"Only tools I installed", checked:function(){return VIEW.requested;}, run:function(){toggleView("requested");}},
       {label:"Only outdated", checked:function(){return VIEW.outdated;}, run:function(){toggleView("outdated");}},
       {sep:true},
-      {label:"Source: npm", checked:function(){return VIEW.sources.npm;}, run:function(){toggleSource("npm");}},
-      {label:"Source: brew", checked:function(){return VIEW.sources.brew;}, run:function(){toggleSource("brew");}},
-      {label:"Source: pip", checked:function(){return VIEW.sources.pip;}, run:function(){toggleSource("pip");}},
-      {label:"Source: npx", checked:function(){return VIEW.sources.npx;}, run:function(){toggleSource("npx");}},
-      {label:"Source: manual", checked:function(){return VIEW.sources.manual;}, run:function(){toggleSource("manual");}},
+      {label:function(){return sourceMenuLabel("npm");}, checked:function(){return VIEW.sources.npm;}, disabled:function(){return sourceScanDisabled("npm");}, run:function(){toggleSource("npm");}},
+      {label:function(){return sourceMenuLabel("brew");}, checked:function(){return VIEW.sources.brew;}, disabled:function(){return sourceScanDisabled("brew");}, run:function(){toggleSource("brew");}},
+      {label:function(){return sourceMenuLabel("pip");}, checked:function(){return VIEW.sources.pip;}, disabled:function(){return sourceScanDisabled("pip");}, run:function(){toggleSource("pip");}},
+      {label:function(){return sourceMenuLabel("npx");}, checked:function(){return VIEW.sources.npx;}, disabled:function(){return sourceScanDisabled("npx");}, run:function(){toggleSource("npx");}},
+      {label:function(){return sourceMenuLabel("manual");}, checked:function(){return VIEW.sources.manual;}, disabled:function(){return sourceScanDisabled("manual");}, run:function(){toggleSource("manual");}},
       {sep:true},
       {label:"Sort by name", dot:function(){return VIEW.sort==="name";}, run:function(){setSort("name");}},
       {label:"Sort by size", dot:function(){return VIEW.sort==="size";}, run:function(){setSort("size");}},
@@ -1096,7 +1121,8 @@
       if(it.sep) return '<div class="sep"></div>';
       var dis = it.disabled && it.disabled();
       var mark = it.checked&&it.checked() ? "✓" : it.dot&&it.dot() ? "•" : "";
-      return '<div class="mi'+(dis?" disabled":"")+'" data-idx="'+idx+'"><span class="mark">'+mark+'</span>'+esc(it.label)+'</div>';
+      var lbl = typeof it.label==="function" ? it.label() : it.label;
+      return '<div class="mi'+(dis?" disabled":"")+'" data-idx="'+idx+'"><span class="mark">'+mark+'</span>'+esc(lbl)+'</div>';
     }).join("");
     pop.style.left=x+"px"; pop.style.top=y+"px"; pop.style.display="block";
     var maxLeft=window.innerWidth-pop.offsetWidth-4; if(x>maxLeft) pop.style.left=Math.max(2,maxLeft)+"px";
@@ -1153,7 +1179,7 @@
   window.showPrefs=function(){
     var i=inv(); if(!i) return;
     // On a get_settings failure, still open the dialog with safe defaults.
-    i("get_settings").then(renderPrefs).catch(function(){ renderPrefs({}); });
+    i("get_settings").then(function(s){ SETTINGS=s||SETTINGS; renderPrefs(s); }).catch(function(){ renderPrefs({}); });
   };
   window.showAbout=function(){
     var box=document.getElementById("modalBox");
@@ -1183,6 +1209,7 @@
           manual:document.getElementById("prefSrc_manual").checked
         }
       };
+      SETTINGS=settings; // View menu's "off in Preferences" greying reflects the save immediately
       closeModal();
       // Rescan only after the settings are persisted, so the scan reads the new sources.
       var after=function(){ FEED_LOADED=false; scanLibrary(); };
@@ -1250,7 +1277,7 @@
   setAppVersion();
   // Initialize the Search empty state, then land on Shared Library (the instant,
   // local home) rather than Search.
-  renderXfers(); loadHistory(); runSearch(""); switchTab("library"); nextStep(); scanLibrary();
+  renderXfers(); loadHistory(); runSearch(""); switchTab("library"); nextStep(); scanLibrary(); loadSettings();
 })();
 </script>
 </body>
