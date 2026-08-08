@@ -1,9 +1,9 @@
+use crate::store::Sources;
 use serde::Serialize;
 use std::path::Path;
-use crate::store::Sources;
 
-pub mod npm;
 pub mod brew;
+pub mod npm;
 pub mod pip;
 
 /// One discovered package in the swarm. Canonical SearchResult shape.
@@ -16,7 +16,7 @@ pub struct SearchResult {
     pub pkg: String,
     pub version: String,
     pub weekly_downloads: u64,
-    pub size: String,        // "" when the registry does not expose install size
+    pub size: String, // "" when the registry does not expose install size
     pub description: String,
 }
 
@@ -43,14 +43,28 @@ pub fn merge(sources: Vec<Vec<SearchResult>>) -> Vec<SearchResult> {
 /// enabled in `sources` are queried (npx is not a search source).
 pub fn search_all(query: &str, cache_dir: &Path, sources: Sources) -> Vec<SearchResult> {
     let query = query.trim();
-    if query.is_empty() { return Vec::new(); }
+    if query.is_empty() {
+        return Vec::new();
+    }
     // Fan out the enabled sources concurrently: total latency becomes the slowest
     // source, not the sum. A panicking source thread degrades to an empty list,
     // so one dead registry still never blanks the grid.
     std::thread::scope(|s| {
-        let n = if sources.npm { Some(s.spawn(|| npm::search_npm(query))) } else { None };
-        let b = if sources.brew { Some(s.spawn(|| brew::search_brew(query, cache_dir))) } else { None };
-        let p = if sources.pip { Some(s.spawn(|| pip::search_pip(query))) } else { None };
+        let n = if sources.npm {
+            Some(s.spawn(|| npm::search_npm(query)))
+        } else {
+            None
+        };
+        let b = if sources.brew {
+            Some(s.spawn(|| brew::search_brew(query, cache_dir)))
+        } else {
+            None
+        };
+        let p = if sources.pip {
+            Some(s.spawn(|| pip::search_pip(query)))
+        } else {
+            None
+        };
         merge(vec![
             n.map(|h| h.join().unwrap_or_default()).unwrap_or_default(),
             b.map(|h| h.join().unwrap_or_default()).unwrap_or_default(),
@@ -64,9 +78,15 @@ mod tests {
     use super::*;
 
     fn r(eco: &str, pkg: &str, dl: u64) -> SearchResult {
-        SearchResult { name: pkg.into(), eco: eco.into(), pkg: pkg.into(),
-            version: "1.0.0".into(), weekly_downloads: dl, size: String::new(),
-            description: String::new() }
+        SearchResult {
+            name: pkg.into(),
+            eco: eco.into(),
+            pkg: pkg.into(),
+            version: "1.0.0".into(),
+            weekly_downloads: dl,
+            size: String::new(),
+            description: String::new(),
+        }
     }
 
     #[test]
@@ -76,9 +96,8 @@ mod tests {
             vec![r("npm", "a", 999), r("pip", "c", 300)], // dup (npm,a) dropped
         ]);
         assert_eq!(merged.len(), 3);
-        assert_eq!(merged[0].pkg, "b");   // 500
-        assert_eq!(merged[1].pkg, "c");   // 300
-        assert_eq!(merged[2].pkg, "a");   // 100 (first-seen kept)
+        assert_eq!(merged[0].pkg, "b"); // 500
+        assert_eq!(merged[1].pkg, "c"); // 300
+        assert_eq!(merged[2].pkg, "a"); // 100 (first-seen kept)
     }
 }
-

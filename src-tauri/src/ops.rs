@@ -11,16 +11,21 @@ pub fn build_command(
     match (eco, action) {
         ("npm", _) => Some((
             "npm".to_string(),
-            vec!["i".to_string(), "-g".to_string(), format!("{}@{}", pkg, version)],
+            vec![
+                "i".to_string(),
+                "-g".to_string(),
+                format!("{}@{}", pkg, version),
+            ],
         )),
         ("pip", _) => Some((
             pip_bin.to_string(),
             vec!["install".to_string(), format!("{}=={}", pkg, version)],
         )),
         // brew install/update only; no version pinning and no rollback.
-        ("brew", "install") | ("brew", "update") => {
-            Some(("brew".to_string(), vec!["install".to_string(), pkg.to_string()]))
-        }
+        ("brew", "install") | ("brew", "update") => Some((
+            "brew".to_string(),
+            vec!["install".to_string(), pkg.to_string()],
+        )),
         // npx Promote to global: install the package globally via npm.
         ("npx", "promote") => Some((
             "npm".to_string(),
@@ -75,7 +80,11 @@ pub fn run_op(
             None => {
                 let _ = app.emit(
                     "transfer-done",
-                    DoneEvent { op_id: op_id.clone(), success: false, code: -1 },
+                    DoneEvent {
+                        op_id: op_id.clone(),
+                        success: false,
+                        code: -1,
+                    },
                 );
                 return;
             }
@@ -91,9 +100,20 @@ pub fn run_op(
             Err(e) => {
                 let _ = app.emit(
                     "transfer-line",
-                    LineEvent { op_id: op_id.clone(), stream: "stderr".into(), line: format!("failed to start {}: {}", prog, e) },
+                    LineEvent {
+                        op_id: op_id.clone(),
+                        stream: "stderr".into(),
+                        line: format!("failed to start {}: {}", prog, e),
+                    },
                 );
-                let _ = app.emit("transfer-done", DoneEvent { op_id: op_id.clone(), success: false, code: -1 });
+                let _ = app.emit(
+                    "transfer-done",
+                    DoneEvent {
+                        op_id: op_id.clone(),
+                        success: false,
+                        code: -1,
+                    },
+                );
                 return;
             }
         };
@@ -104,7 +124,14 @@ pub fn run_op(
             let id2 = op_id.clone();
             handles.push(std::thread::spawn(move || {
                 for line in BufReader::new(pipe).lines().map_while(Result::ok) {
-                    let _ = app2.emit("transfer-line", LineEvent { op_id: id2.clone(), stream: "stdout".into(), line });
+                    let _ = app2.emit(
+                        "transfer-line",
+                        LineEvent {
+                            op_id: id2.clone(),
+                            stream: "stdout".into(),
+                            line,
+                        },
+                    );
                 }
             }));
         }
@@ -113,7 +140,14 @@ pub fn run_op(
             let id2 = op_id.clone();
             handles.push(std::thread::spawn(move || {
                 for line in BufReader::new(pipe).lines().map_while(Result::ok) {
-                    let _ = app2.emit("transfer-line", LineEvent { op_id: id2.clone(), stream: "stderr".into(), line });
+                    let _ = app2.emit(
+                        "transfer-line",
+                        LineEvent {
+                            op_id: id2.clone(),
+                            stream: "stderr".into(),
+                            line,
+                        },
+                    );
                 }
             }));
         }
@@ -123,13 +157,30 @@ pub fn run_op(
             let _ = h.join();
         }
 
-        let code = status.as_ref().map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
+        let code = status
+            .as_ref()
+            .map(|s| s.code().unwrap_or(-1))
+            .unwrap_or(-1);
         let success = status.map(|s| s.success()).unwrap_or(false);
 
         if success {
-            store.add_history(HistoryEntry { ts, pkg, eco, action, from, to });
+            store.add_history(HistoryEntry {
+                ts,
+                pkg,
+                eco,
+                action,
+                from,
+                to,
+            });
         }
-        let _ = app.emit("transfer-done", DoneEvent { op_id, success, code });
+        let _ = app.emit(
+            "transfer-done",
+            DoneEvent {
+                op_id,
+                success,
+                code,
+            },
+        );
     });
 }
 

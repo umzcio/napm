@@ -1,8 +1,8 @@
 use super::InstalledTool;
+use serde_json::Value;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::process::Command;
-use serde_json::Value;
 
 /// Merge `pip list --format=json` (installed) with
 /// `pip list --outdated --format=json` (latest), keyed by lowercased name.
@@ -34,7 +34,10 @@ pub fn parse_pip(list_json: &str, outdated_json: &str) -> Vec<InstalledTool> {
                     _ => continue,
                 };
                 let cur = p.get("version").and_then(|v| v.as_str());
-                let latest = p.get("latest_version").and_then(|v| v.as_str()).unwrap_or("");
+                let latest = p
+                    .get("latest_version")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 match map.entry(name.to_lowercase()) {
                     Entry::Occupied(mut o) => {
                         let e = o.get_mut();
@@ -47,7 +50,11 @@ pub fn parse_pip(list_json: &str, outdated_json: &str) -> Vec<InstalledTool> {
                     }
                     Entry::Vacant(v) => {
                         if !latest.is_empty() {
-                            v.insert((name.to_string(), cur.map(|s| s.to_string()), latest.to_string()));
+                            v.insert((
+                                name.to_string(),
+                                cur.map(|s| s.to_string()),
+                                latest.to_string(),
+                            ));
                         }
                     }
                 }
@@ -136,7 +143,12 @@ fn pip_metadata() -> BTreeMap<String, PipMeta> {
             let updated = super::path_mtime(&info_dir);
             map.insert(
                 name.to_lowercase(),
-                PipMeta { publisher, description, size, updated },
+                PipMeta {
+                    publisher,
+                    description,
+                    size,
+                    updated,
+                },
             );
         }
     }

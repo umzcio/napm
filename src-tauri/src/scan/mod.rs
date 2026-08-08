@@ -1,12 +1,12 @@
+use crate::store::Sources;
 use serde::Serialize;
 use std::process::Command;
-use crate::store::Sources;
 
-pub mod npm;
 pub mod brew;
-pub mod pip;
-pub mod npx;
 pub mod manual;
+pub mod npm;
+pub mod npx;
+pub mod pip;
 pub mod publisher;
 pub mod size;
 
@@ -61,10 +61,18 @@ pub(crate) fn path_mtime(path: &std::path::Path) -> i64 {
 /// Only sources enabled in `sources` are scanned.
 pub fn scan_all(pins: &std::collections::BTreeSet<String>, sources: Sources) -> Vec<InstalledTool> {
     let mut all = Vec::new();
-    if sources.npm { all.extend(npm::scan_npm()); }
-    if sources.brew { all.extend(brew::scan_brew()); }
-    if sources.pip { all.extend(pip::scan_pip()); }
-    if sources.npx { all.extend(npx::scan_npx()); }
+    if sources.npm {
+        all.extend(npm::scan_npm());
+    }
+    if sources.brew {
+        all.extend(brew::scan_brew());
+    }
+    if sources.pip {
+        all.extend(pip::scan_pip());
+    }
+    if sources.npx {
+        all.extend(npx::scan_npx());
+    }
     if sources.manual {
         let other_names: std::collections::BTreeSet<String> =
             all.iter().map(|t| t.name.clone()).collect();

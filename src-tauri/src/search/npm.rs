@@ -5,20 +5,43 @@ use std::collections::BTreeMap;
 /// Parse the npm registry search response into results (downloads filled in
 /// later by the wrapper; size is not exposed by npm search so it stays "").
 pub fn parse_npm_search(json: &str) -> Vec<SearchResult> {
-    let v: Value = match serde_json::from_str(json) { Ok(v) => v, Err(_) => return Vec::new() };
+    let v: Value = match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
     let objects = match v.get("objects").and_then(|o| o.as_array()) {
-        Some(a) => a, None => return Vec::new(),
+        Some(a) => a,
+        None => return Vec::new(),
     };
     let mut out = Vec::new();
     for o in objects {
-        let p = match o.get("package") { Some(p) => p, None => continue };
+        let p = match o.get("package") {
+            Some(p) => p,
+            None => continue,
+        };
         let name = p.get("name").and_then(|x| x.as_str()).unwrap_or("");
-        if name.is_empty() { continue; }
-        let version = p.get("version").and_then(|x| x.as_str()).unwrap_or("").to_string();
-        let description = p.get("description").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+        if name.is_empty() {
+            continue;
+        }
+        let version = p
+            .get("version")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string();
+        let description = p
+            .get("description")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
         out.push(SearchResult {
-            name: name.to_string(), eco: "npm".into(), pkg: name.to_string(),
-            version, weekly_downloads: 0, size: String::new(), description,
+            name: name.to_string(),
+            eco: "npm".into(),
+            pkg: name.to_string(),
+            version,
+            weekly_downloads: 0,
+            size: String::new(),
+            description,
         });
     }
     out
@@ -29,7 +52,10 @@ pub fn parse_npm_search(json: &str) -> Vec<SearchResult> {
 /// (`{"downloads":N,"package":"pkg"}`). Returns pkg -> weekly downloads.
 pub fn parse_downloads(json: &str) -> BTreeMap<String, u64> {
     let mut map = BTreeMap::new();
-    let v: Value = match serde_json::from_str(json) { Ok(v) => v, Err(_) => return map };
+    let v: Value = match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(_) => return map,
+    };
     // Single shape: has a top-level "package" string + "downloads" number.
     if let (Some(pkg), Some(dl)) = (
         v.get("package").and_then(|x| x.as_str()),
@@ -67,11 +93,13 @@ pub fn search_npm(query: &str) -> Vec<SearchResult> {
     }
 
     // Split into unscoped (no leading '@') and scoped packages.
-    let unscoped: Vec<String> = rows.iter()
+    let unscoped: Vec<String> = rows
+        .iter()
         .filter(|r| !r.pkg.starts_with('@'))
         .map(|r| r.pkg.clone())
         .collect();
-    let scoped: Vec<String> = rows.iter()
+    let scoped: Vec<String> = rows
+        .iter()
         .filter(|r| r.pkg.starts_with('@'))
         .map(|r| r.pkg.clone())
         .collect();
@@ -81,10 +109,7 @@ pub fn search_npm(query: &str) -> Vec<SearchResult> {
     // Bulk-fetch unscoped packages in one call.
     if !unscoped.is_empty() {
         let joined = unscoped.join(",");
-        let dl_url = format!(
-            "https://api.npmjs.org/downloads/point/last-week/{}",
-            joined
-        );
+        let dl_url = format!("https://api.npmjs.org/downloads/point/last-week/{}", joined);
         if let Ok(dl_body) = crate::http::get(&dl_url) {
             for (k, v) in parse_downloads(&dl_body) {
                 dl_map.insert(k, v);
@@ -96,22 +121,30 @@ pub fn search_npm(query: &str) -> Vec<SearchResult> {
     // scoped names). The shared agent keeps connections warm across them.
     if !scoped.is_empty() {
         let maps: Vec<BTreeMap<String, u64>> = std::thread::scope(|s| {
-            let handles: Vec<_> = scoped.iter().map(|pkg| {
-                s.spawn(move || {
-                    let dl_url = format!(
-                        "https://api.npmjs.org/downloads/point/last-week/{}",
-                        crate::http::encode(pkg)
-                    );
-                    match crate::http::get(&dl_url) {
-                        Ok(dl_body) => parse_downloads(&dl_body),
-                        Err(_) => BTreeMap::new(),
-                    }
+            let handles: Vec<_> = scoped
+                .iter()
+                .map(|pkg| {
+                    s.spawn(move || {
+                        let dl_url = format!(
+                            "https://api.npmjs.org/downloads/point/last-week/{}",
+                            crate::http::encode(pkg)
+                        );
+                        match crate::http::get(&dl_url) {
+                            Ok(dl_body) => parse_downloads(&dl_body),
+                            Err(_) => BTreeMap::new(),
+                        }
+                    })
                 })
-            }).collect();
-            handles.into_iter().map(|h| h.join().unwrap_or_default()).collect()
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().unwrap_or_default())
+                .collect()
         });
         for m in maps {
-            for (k, v) in m { dl_map.insert(k, v); }
+            for (k, v) in m {
+                dl_map.insert(k, v);
+            }
         }
     }
 

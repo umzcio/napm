@@ -89,13 +89,19 @@ mod tests {
     #[test]
     fn extracts_clean_path() {
         let out = "__NAPM_PATH_START__/opt/homebrew/bin:/usr/bin__NAPM_PATH_END__";
-        assert_eq!(extract_path(out).as_deref(), Some("/opt/homebrew/bin:/usr/bin"));
+        assert_eq!(
+            extract_path(out).as_deref(),
+            Some("/opt/homebrew/bin:/usr/bin")
+        );
     }
 
     #[test]
     fn extracts_through_rc_noise() {
         let out = "welcome to your shell\nsome banner\n__NAPM_PATH_START__/usr/local/bin:/usr/bin__NAPM_PATH_END__\n";
-        assert_eq!(extract_path(out).as_deref(), Some("/usr/local/bin:/usr/bin"));
+        assert_eq!(
+            extract_path(out).as_deref(),
+            Some("/usr/local/bin:/usr/bin")
+        );
     }
 
     #[test]
@@ -107,7 +113,10 @@ mod tests {
     #[test]
     fn empty_between_markers_is_none() {
         assert_eq!(extract_path("__NAPM_PATH_START____NAPM_PATH_END__"), None);
-        assert_eq!(extract_path("__NAPM_PATH_START__   __NAPM_PATH_END__"), None);
+        assert_eq!(
+            extract_path("__NAPM_PATH_START__   __NAPM_PATH_END__"),
+            None
+        );
     }
 
     #[test]

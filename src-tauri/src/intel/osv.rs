@@ -14,15 +14,29 @@ pub fn osv_ecosystem(eco: &str) -> Option<&'static str> {
 /// Parse an OSV querybatch response into a vector aligned to the request order:
 /// each element is the list of advisory IDs affecting that query (empty = clean).
 pub fn parse_osv_batch(json: &str) -> Vec<Vec<String>> {
-    let v: Value = match serde_json::from_str(json) { Ok(v) => v, Err(_) => return Vec::new() };
-    let results = match v.get("results").and_then(|r| r.as_array()) {
-        Some(a) => a, None => return Vec::new(),
+    let v: Value = match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
     };
-    results.iter().map(|r| {
-        r.get("vulns").and_then(|x| x.as_array()).map(|arr| {
-            arr.iter().filter_map(|vuln| vuln.get("id").and_then(|i| i.as_str()).map(String::from)).collect()
-        }).unwrap_or_default()
-    }).collect()
+    let results = match v.get("results").and_then(|r| r.as_array()) {
+        Some(a) => a,
+        None => return Vec::new(),
+    };
+    results
+        .iter()
+        .map(|r| {
+            r.get("vulns")
+                .and_then(|x| x.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|vuln| {
+                            vuln.get("id").and_then(|i| i.as_str()).map(String::from)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+        .collect()
 }
 
 /// Classify and summarize a single OSV vuln detail document.
@@ -31,23 +45,43 @@ pub fn parse_osv_batch(json: &str) -> Vec<Vec<String>> {
 pub fn parse_osv_vuln(json: &str) -> Option<(String, String, Option<String>)> {
     let v: Value = serde_json::from_str(json).ok()?;
     let id = v.get("id").and_then(|x| x.as_str())?;
-    let severity = if id.starts_with("MAL-") { "malicious" } else { "vulnerable" };
-    let summary = v.get("summary").and_then(|x| x.as_str())
+    let severity = if id.starts_with("MAL-") {
+        "malicious"
+    } else {
+        "vulnerable"
+    };
+    let summary = v
+        .get("summary")
+        .and_then(|x| x.as_str())
         .or_else(|| v.get("details").and_then(|x| x.as_str()))
         .unwrap_or("")
-        .lines().next().unwrap_or("").trim().to_string();
+        .lines()
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string();
     // First "fixed" event across all affected ranges.
-    let fixed_version = v.get("affected").and_then(|a| a.as_array()).and_then(|affected| {
-        affected.iter().find_map(|aff| {
-            aff.get("ranges").and_then(|r| r.as_array()).and_then(|ranges| {
-                ranges.iter().find_map(|range| {
-                    range.get("events").and_then(|e| e.as_array()).and_then(|events| {
-                        events.iter().find_map(|ev| ev.get("fixed").and_then(|f| f.as_str()).map(String::from))
+    let fixed_version = v
+        .get("affected")
+        .and_then(|a| a.as_array())
+        .and_then(|affected| {
+            affected.iter().find_map(|aff| {
+                aff.get("ranges")
+                    .and_then(|r| r.as_array())
+                    .and_then(|ranges| {
+                        ranges.iter().find_map(|range| {
+                            range
+                                .get("events")
+                                .and_then(|e| e.as_array())
+                                .and_then(|events| {
+                                    events.iter().find_map(|ev| {
+                                        ev.get("fixed").and_then(|f| f.as_str()).map(String::from)
+                                    })
+                                })
+                        })
                     })
-                })
             })
-        })
-    });
+        });
     Some((severity.to_string(), summary, fixed_version))
 }
 
@@ -56,27 +90,35 @@ pub fn parse_osv_vuln(json: &str) -> Option<(String, String, Option<String>)> {
 /// Returns Some(alerts) otherwise (possibly empty).
 pub fn scan_security(installed: &[ToolRef]) -> Option<Vec<SecurityAlert>> {
     // Build queries only for tools with a supported ecosystem and an installed version.
-    let eligible: Vec<(&ToolRef, &'static str)> = installed.iter().filter_map(|t| {
-        let eco = osv_ecosystem(&t.eco)?;
-        // Reject tools with no installed version or an empty installed version string.
-        // OSV with an empty version returns all advisories for the package, which
-        // would be misleading and potentially very noisy.
-        let ver = t.installed.as_deref()?;
-        if ver.is_empty() { return None; }
-        Some((t, eco))
-    }).collect();
+    let eligible: Vec<(&ToolRef, &'static str)> = installed
+        .iter()
+        .filter_map(|t| {
+            let eco = osv_ecosystem(&t.eco)?;
+            // Reject tools with no installed version or an empty installed version string.
+            // OSV with an empty version returns all advisories for the package, which
+            // would be misleading and potentially very noisy.
+            let ver = t.installed.as_deref()?;
+            if ver.is_empty() {
+                return None;
+            }
+            Some((t, eco))
+        })
+        .collect();
 
     if eligible.is_empty() {
         return Some(Vec::new());
     }
 
     // Build the batch query body.
-    let queries: Vec<serde_json::Value> = eligible.iter().map(|(t, eco)| {
-        serde_json::json!({
-            "package": { "ecosystem": eco, "name": t.pkg },
-            "version": t.installed.as_deref().unwrap_or("")
+    let queries: Vec<serde_json::Value> = eligible
+        .iter()
+        .map(|(t, eco)| {
+            serde_json::json!({
+                "package": { "ecosystem": eco, "name": t.pkg },
+                "version": t.installed.as_deref().unwrap_or("")
+            })
         })
-    }).collect();
+        .collect();
     let body = serde_json::json!({ "queries": queries }).to_string();
 
     let batch_resp = crate::http::post_json("https://api.osv.dev/v1/querybatch", &body).ok()?;
@@ -92,13 +134,22 @@ pub fn scan_security(installed: &[ToolRef]) -> Option<Vec<SecurityAlert>> {
     // Collect (tool, chosen_id) pairs for those with advisories.
     // If any id in the list starts with "MAL-", use that (malicious takes priority
     // over a co-listed GHSA); otherwise fall back to the first id.
-    let flagged: Vec<(&ToolRef, String)> = eligible.iter().enumerate().filter_map(|(i, (t, _eco))| {
-        let ids = id_lists.get(i)?;
-        if ids.is_empty() { return None; }
-        let chosen = ids.iter().find(|id| id.starts_with("MAL-"))
-            .or_else(|| ids.first())?.clone();
-        Some((*t, chosen))
-    }).collect();
+    let flagged: Vec<(&ToolRef, String)> = eligible
+        .iter()
+        .enumerate()
+        .filter_map(|(i, (t, _eco))| {
+            let ids = id_lists.get(i)?;
+            if ids.is_empty() {
+                return None;
+            }
+            let chosen = ids
+                .iter()
+                .find(|id| id.starts_with("MAL-"))
+                .or_else(|| ids.first())?
+                .clone();
+            Some((*t, chosen))
+        })
+        .collect();
 
     // Severity is encoded in the advisory id (MAL- = malicious), so it needs no
     // network call. Build the vulnerable alerts immediately with no detail fetch
@@ -113,9 +164,14 @@ pub fn scan_security(installed: &[ToolRef]) -> Option<Vec<SecurityAlert>> {
         } else {
             let link = format!("https://osv.dev/vulnerability/{}", id);
             alerts.push(SecurityAlert {
-                pkg: t.pkg.clone(), eco: t.eco.clone(), severity: "vulnerable".into(),
-                id, summary: String::new(), installed: t.installed.clone().unwrap_or_default(),
-                fixed_version: None, link,
+                pkg: t.pkg.clone(),
+                eco: t.eco.clone(),
+                severity: "vulnerable".into(),
+                id,
+                summary: String::new(),
+                installed: t.installed.clone().unwrap_or_default(),
+                fixed_version: None,
+                link,
             });
         }
     }
@@ -123,21 +179,34 @@ pub fn scan_security(installed: &[ToolRef]) -> Option<Vec<SecurityAlert>> {
     // Malicious are rare; fetch their details in parallel so the card knows
     // upfront whether a fixed version exists or removal is the only remedy.
     std::thread::scope(|s| {
-        let handles: Vec<_> = malicious.iter().map(|(t, id)| {
-            let id = id.clone();
-            let pkg = t.pkg.clone();
-            let eco = t.eco.clone();
-            let installed_ver = t.installed.clone().unwrap_or_default();
-            s.spawn(move || -> SecurityAlert {
-                let link = format!("https://osv.dev/vulnerability/{}", id);
-                let (summary, fixed_version) = crate::http::get(&format!("https://api.osv.dev/v1/vulns/{}", id))
-                    .ok()
-                    .and_then(|d| parse_osv_vuln(&d))
-                    .map(|(_, sum, fixed)| (sum, fixed))
-                    .unwrap_or_default();
-                SecurityAlert { pkg, eco, severity: "malicious".into(), id, summary, installed: installed_ver, fixed_version, link }
+        let handles: Vec<_> = malicious
+            .iter()
+            .map(|(t, id)| {
+                let id = id.clone();
+                let pkg = t.pkg.clone();
+                let eco = t.eco.clone();
+                let installed_ver = t.installed.clone().unwrap_or_default();
+                s.spawn(move || -> SecurityAlert {
+                    let link = format!("https://osv.dev/vulnerability/{}", id);
+                    let (summary, fixed_version) =
+                        crate::http::get(&format!("https://api.osv.dev/v1/vulns/{}", id))
+                            .ok()
+                            .and_then(|d| parse_osv_vuln(&d))
+                            .map(|(_, sum, fixed)| (sum, fixed))
+                            .unwrap_or_default();
+                    SecurityAlert {
+                        pkg,
+                        eco,
+                        severity: "malicious".into(),
+                        id,
+                        summary,
+                        installed: installed_ver,
+                        fixed_version,
+                        link,
+                    }
+                })
             })
-        }).collect();
+            .collect();
         for h in handles {
             if let Ok(alert) = h.join() {
                 alerts.push(alert);

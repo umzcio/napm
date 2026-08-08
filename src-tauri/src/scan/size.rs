@@ -56,7 +56,11 @@ pub fn dir_size(path: &Path) -> u64 {
 pub fn record_total_size(record: &str) -> u64 {
     record
         .lines()
-        .filter_map(|line| line.rsplit(',').next().and_then(|s| s.trim().parse::<u64>().ok()))
+        .filter_map(|line| {
+            line.rsplit(',')
+                .next()
+                .and_then(|s| s.trim().parse::<u64>().ok())
+        })
         .sum()
 }
 

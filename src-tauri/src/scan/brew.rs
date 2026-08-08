@@ -1,7 +1,7 @@
 use super::InstalledTool;
+use serde_json::Value;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
-use serde_json::Value;
 
 /// Merge `brew list --versions` (installed) with `brew outdated --json=v2`
 /// (latest). Mirrors reference/scanner.js scanBrew().
@@ -25,7 +25,10 @@ pub fn parse_brew(list_versions: &str, outdated_json: &str) -> Vec<InstalledTool
                     Some(n) if !n.is_empty() => n,
                     _ => continue,
                 };
-                let latest = f.get("current_version").and_then(|v| v.as_str()).unwrap_or("");
+                let latest = f
+                    .get("current_version")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 let installed = f
                     .get("installed_versions")
                     .and_then(|v| v.as_array())
@@ -131,7 +134,10 @@ pub fn scan_brew() -> Vec<InstalledTool> {
 /// Parse an INSTALL_RECEIPT.json body into (install_time_secs, installed_on_request).
 /// Either may be None when absent.
 pub fn parse_install_receipt(json: &str) -> (Option<i64>, Option<bool>) {
-    let v: Value = match serde_json::from_str(json) { Ok(v) => v, Err(_) => return (None, None) };
+    let v: Value = match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(_) => return (None, None),
+    };
     let time = v.get("time").and_then(|x| x.as_i64());
     let on_request = v.get("installed_on_request").and_then(|x| x.as_bool());
     (time, on_request)
@@ -143,7 +149,10 @@ fn brew_receipt(keg: &std::path::Path) -> (i64, bool) {
     let (time, on_request) = std::fs::read_to_string(keg.join("INSTALL_RECEIPT.json"))
         .map(|s| parse_install_receipt(&s))
         .unwrap_or((None, None));
-    (time.unwrap_or_else(|| super::path_mtime(keg)), on_request.unwrap_or(true))
+    (
+        time.unwrap_or_else(|| super::path_mtime(keg)),
+        on_request.unwrap_or(true),
+    )
 }
 
 #[cfg(test)]

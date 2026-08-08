@@ -22,7 +22,9 @@ pub fn first_version(s: &str) -> Option<String> {
             let parts: Vec<&str> = tok.split('.').collect();
             if parts.len() >= 2
                 && !parts[0].is_empty()
-                && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|c| c.is_ascii_digit()))
+                && parts
+                    .iter()
+                    .all(|p| !p.is_empty() && p.bytes().all(|c| c.is_ascii_digit()))
             {
                 return Some(tok.to_string());
             }
@@ -60,7 +62,9 @@ fn managed_roots() -> Vec<PathBuf> {
     }
     // Home-relative toolchain / version-manager dirs and the npx cache.
     if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
-        for sub in [".cargo", ".rustup", ".nvm", ".pyenv", ".volta", ".asdf", "go/bin"] {
+        for sub in [
+            ".cargo", ".rustup", ".nvm", ".pyenv", ".volta", ".asdf", "go/bin",
+        ] {
             roots.push(home.join(sub));
         }
         roots.push(home.join(".npm").join("_npx"));
@@ -283,22 +287,50 @@ mod tests {
         names.insert("eslint".to_string());
 
         // Homebrew cellar (under /opt/homebrew)
-        assert!(is_managed(Path::new("/opt/homebrew/Cellar/foo/1.0/bin/foo"), "foo", &roots, &names));
+        assert!(is_managed(
+            Path::new("/opt/homebrew/Cellar/foo/1.0/bin/foo"),
+            "foo",
+            &roots,
+            &names
+        ));
         // app bundle CLI
-        assert!(is_managed(Path::new("/Applications/Docker.app/Contents/Resources/bin/docker"), "docker", &roots, &names));
+        assert!(is_managed(
+            Path::new("/Applications/Docker.app/Contents/Resources/bin/docker"),
+            "docker",
+            &roots,
+            &names
+        ));
         // cargo toolchain
-        assert!(is_managed(Path::new("/Users/x/.cargo/bin/cargo"), "cargo", &roots, &names));
+        assert!(is_managed(
+            Path::new("/Users/x/.cargo/bin/cargo"),
+            "cargo",
+            &roots,
+            &names
+        ));
         // system dir
         assert!(is_managed(Path::new("/usr/bin/ls"), "ls", &roots, &names));
         // name already owned by npm/pip/npx/brew scan, regardless of path
-        assert!(is_managed(Path::new("/Users/x/.local/bin/eslint"), "eslint", &roots, &names));
+        assert!(is_managed(
+            Path::new("/Users/x/.local/bin/eslint"),
+            "eslint",
+            &roots,
+            &names
+        ));
         // a genuinely-manual tool: not excluded
-        assert!(!is_managed(Path::new("/Users/x/.local/bin/agy"), "agy", &roots, &names));
+        assert!(!is_managed(
+            Path::new("/Users/x/.local/bin/agy"),
+            "agy",
+            &roots,
+            &names
+        ));
     }
 
     #[test]
     fn version_from_filename() {
-        assert_eq!(first_version("grok-0.2.14-macos-aarch64").as_deref(), Some("0.2.14"));
+        assert_eq!(
+            first_version("grok-0.2.14-macos-aarch64").as_deref(),
+            Some("0.2.14")
+        );
         assert_eq!(first_version("tool-v1.2").as_deref(), Some("1.2"));
         assert_eq!(first_version("agy").as_deref(), None);
         assert_eq!(first_version("aarch64").as_deref(), None); // digits, no dot
@@ -306,8 +338,14 @@ mod tests {
 
     #[test]
     fn version_from_output() {
-        assert_eq!(first_version("grok 0.2.14 (e0d895d)").as_deref(), Some("0.2.14"));
+        assert_eq!(
+            first_version("grok 0.2.14 (e0d895d)").as_deref(),
+            Some("0.2.14")
+        );
         assert_eq!(first_version("v1.4.0").as_deref(), Some("1.4.0"));
-        assert_eq!(first_version("some build, no version here").as_deref(), None);
+        assert_eq!(
+            first_version("some build, no version here").as_deref(),
+            None
+        );
     }
 }
