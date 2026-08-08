@@ -6,6 +6,7 @@
 //! updater private key (`~/.napm/napm-updater.key`), confirming that:
 //!   1. a valid signature verifies against the baked public key, and
 //!   2. any tampering (to the payload or the signature) is rejected.
+//!
 //! If signature checking ever silently broke, an attacker-substituted bundle
 //! would install; this test is the guard against that.
 

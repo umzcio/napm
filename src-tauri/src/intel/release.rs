@@ -246,6 +246,9 @@ struct HoldCache {
 /// when issues are opening fast enough to warrant holding, else None (stay "new").
 /// Token-gated (no token -> None), cached 12h per (eco,pkg,version). Any HTTP
 /// failure returns None and is not cached. `published` is the release unix time.
+// Each parameter is an independently-sourced piece of release identity/context;
+// bundling them into a struct would not clarify the call sites in this module.
+#[allow(clippy::too_many_arguments)]
 fn velocity_verdict(
     eco: &str,
     pkg: &str,

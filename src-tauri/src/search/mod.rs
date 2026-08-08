@@ -33,7 +33,7 @@ pub fn merge(sources: Vec<Vec<SearchResult>>) -> Vec<SearchResult> {
             }
         }
     }
-    out.sort_by(|a, b| b.weekly_downloads.cmp(&a.weekly_downloads));
+    out.sort_by_key(|r| std::cmp::Reverse(r.weekly_downloads));
     out
 }
 

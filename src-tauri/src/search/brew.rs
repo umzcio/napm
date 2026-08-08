@@ -153,11 +153,14 @@ fn catalog_cell() -> &'static Mutex<Option<CatalogCache>> {
     CELL.get_or_init(|| Mutex::new(None))
 }
 
+/// Catalog formulae plus their weekly-install analytics, returned as cheap Arc clones.
+type CatalogAndAnalytics = (Arc<Vec<Formula>>, Arc<BTreeMap<String, u64>>);
+
 /// Load the parsed catalog and analytics, using the in-memory copy when it is
 /// under 24h old, otherwise rebuilding it from `cached_or_fetch` (which itself
 /// keeps a 24h disk cache). Returns cheap Arc clones. Returns None only when the
 /// catalog cannot be obtained at all (no memory copy, no disk copy, no network).
-fn load_catalog(cache_dir: &Path) -> Option<(Arc<Vec<Formula>>, Arc<BTreeMap<String, u64>>)> {
+fn load_catalog(cache_dir: &Path) -> Option<CatalogAndAnalytics> {
     {
         let guard = catalog_cell().lock().unwrap();
         if let Some(c) = guard.as_ref() {
