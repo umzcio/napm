@@ -69,7 +69,11 @@ pub struct Advisory {
 #[serde(rename_all = "camelCase")]
 pub struct WhatsNew {
     pub alerts: Vec<SecurityAlert>,
-    pub security_ok: bool, // false => OSV check failed, do not imply clean
+    pub security_ok: bool, // false => OSV check failed OR disabled, do not imply clean
+    /// True when the advisory scan was skipped by user choice (Preferences),
+    /// as opposed to attempted and failing. Distinct from `security_ok` so the
+    /// frontend can render "off by choice" rather than "check broke".
+    pub security_disabled: bool,
     pub wire: Vec<WireItem>,
     pub wire_ok: bool,
     pub verdicts: Vec<ReleaseInfo>,
@@ -99,14 +103,21 @@ pub fn github_token(cache_dir: &Path) -> Option<String> {
 /// Run all three layers concurrently and assemble the feed payload.
 /// `verdict_scope` is the list of pkg names (matching ToolRef.pkg) the frontend
 /// wants age verdicts for. Verdicts already covered by a security alert are dropped.
+/// `advisories_enabled` gates only the batched OSV inventory scan (the
+/// security alerts); the wire and release-age verdicts always run regardless.
 pub fn whats_new(
     installed: &[ToolRef],
     verdict_scope: &[String],
     cache_dir: &Path,
     now: i64,
+    advisories_enabled: bool,
 ) -> WhatsNew {
     std::thread::scope(|s| {
-        let sec = s.spawn(|| osv::scan_security(installed));
+        let sec = if advisories_enabled {
+            Some(s.spawn(|| osv::scan_security(installed)))
+        } else {
+            None
+        };
         let wir = s.spawn(|| wire::fetch_wire(cache_dir));
         let ver = s.spawn(|| {
             // Resolve the tool refs for each requested pkg first (sequential, cheap).
@@ -161,12 +172,16 @@ pub fn whats_new(
             results.into_iter().flatten().collect::<Vec<_>>()
         });
 
-        let sec = sec.join().unwrap_or(None);
+        let sec = sec.map(|h| h.join().unwrap_or(None));
         let wir = wir.join().unwrap_or(None);
         let mut verdicts = ver.join().unwrap_or_default();
 
+        // `sec` is None when the scan was disabled by user choice (distinct from
+        // `Some(None)`, which is an attempted-and-failed OSV call).
+        let security_disabled = sec.is_none();
         let (alerts, security_ok) = match sec {
-            Some(a) => (a, true),
+            Some(Some(a)) => (a, true),
+            Some(None) => (Vec::new(), false),
             None => (Vec::new(), false),
         };
         // Drop verdicts that are already covered by a security alert. Key on
@@ -185,6 +200,7 @@ pub fn whats_new(
         WhatsNew {
             alerts,
             security_ok,
+            security_disabled,
             wire,
             wire_ok,
             verdicts,
@@ -204,5 +220,33 @@ mod tests {
         assert_eq!(t.pkg, "eslint");
         assert_eq!(t.eco, "npm");
         assert_eq!(t.installed.as_deref(), Some("9.0.0"));
+    }
+
+    #[test]
+    fn whats_new_with_advisories_disabled_skips_osv_and_marks_disabled() {
+        // The OSV spawn must be skipped entirely (not attempted-and-failed),
+        // so the disabled shape is: no alerts, security_ok false, and a
+        // distinct security_disabled flag the frontend can render as "off by
+        // choice" rather than "check broke". Pre-seed a fresh wire cache so
+        // this test never touches the network.
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("napm-test-whatsnew-disabled-{:p}", &dir));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("wire.json"), b"[]").unwrap();
+
+        let installed = vec![ToolRef {
+            pkg: "eslint".into(),
+            eco: "npm".into(),
+            installed: Some("9.0.0".into()),
+            latest: "9.0.0".into(),
+        }];
+        let result = whats_new(&installed, &[], &dir, 0, false);
+        assert!(result.alerts.is_empty());
+        assert!(!result.security_ok);
+        assert!(result.security_disabled);
+        assert!(result.wire_ok); // fresh cache hit, unrelated to the advisory toggle
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

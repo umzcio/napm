@@ -54,6 +54,14 @@ pub struct Settings {
     /// deserializes to true via `#[serde(default)]` reading the field off
     /// `Settings::default()` below.
     pub probe_manual: bool,
+    /// Whether the What's New feed may send the installed-package inventory
+    /// (names and versions) to OSV.dev for the advisory scan. Defaults to
+    /// true (existing behavior); an old settings.json missing this key still
+    /// deserializes to true via `#[serde(default)]` reading the field off
+    /// `Settings::default()` below. When false, `intel::whats_new` must skip
+    /// the OSV call entirely and report a distinct "disabled" state rather
+    /// than a clean result.
+    pub advisory_checks: bool,
 }
 
 impl Default for Settings {
@@ -62,6 +70,7 @@ impl Default for Settings {
             github_token: String::new(),
             sources: Sources::default(),
             probe_manual: true,
+            advisory_checks: true,
         }
     }
 }
@@ -309,6 +318,7 @@ mod tests {
         assert_eq!(def.github_token, "");
         assert!(def.sources.npm && def.sources.brew && def.sources.pip && def.sources.npx);
         assert!(def.probe_manual);
+        assert!(def.advisory_checks);
         s.set_settings(&Settings {
             github_token: "abc".into(),
             sources: Sources {
@@ -319,12 +329,14 @@ mod tests {
                 manual: true,
             },
             probe_manual: false,
+            advisory_checks: false,
         });
         let got = s.settings();
         assert_eq!(got.github_token, "abc");
         assert!(!got.sources.brew);
         assert!(got.sources.npm && got.sources.pip);
         assert!(!got.probe_manual);
+        assert!(!got.advisory_checks);
     }
 
     #[test]
@@ -336,6 +348,7 @@ mod tests {
             github_token: "secret-token".into(),
             sources: Sources::default(),
             probe_manual: true,
+            advisory_checks: true,
         });
         let perm = std::fs::metadata(s.dir_for_test().join("settings.json"))
             .unwrap()
@@ -375,6 +388,7 @@ mod tests {
         assert_eq!(def.github_token, "");
         assert!(def.sources.brew); // corrupt -> all sources on, no panic
         assert!(def.probe_manual); // corrupt -> probing on (default), no panic
+        assert!(def.advisory_checks); // corrupt -> advisory checks on (default), no panic
     }
 
     #[test]
@@ -409,6 +423,23 @@ mod tests {
         let got = s.settings();
         assert_eq!(got.github_token, "abc");
         assert!(got.probe_manual);
+    }
+
+    #[test]
+    fn old_settings_file_without_advisory_checks_key_defaults_to_true() {
+        // Simulates a settings.json written before this field existed: no
+        // "advisoryChecks" key at all. It must still parse, and the advisory
+        // scan must default on so upgrading users see no behavior change.
+        let s = temp_store();
+        std::fs::create_dir_all(s.dir_for_test()).unwrap();
+        std::fs::write(
+            s.dir_for_test().join("settings.json"),
+            br#"{"githubToken":"abc","sources":{"npm":true,"brew":true,"pip":true,"npx":true,"manual":true},"probeManual":true}"#,
+        )
+        .unwrap();
+        let got = s.settings();
+        assert_eq!(got.github_token, "abc");
+        assert!(got.advisory_checks);
     }
 
     #[test]
