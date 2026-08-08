@@ -6,6 +6,20 @@ CONFIG="$ROOT/scripts/.notary-config.local"
 # shellcheck disable=SC1090
 source "$CONFIG"
 
+# Refuse to build on a version mismatch across the three manifests that must
+# agree (package.json, Cargo.toml, tauri.conf.json). Run scripts/bump-version.sh
+# to bring them back into sync.
+command -v jq >/dev/null || { echo "jq is required (brew install jq)"; exit 1; }
+PKG_VER="$(jq -r .version "$ROOT/package.json")"
+CARGO_VER="$(awk '/^version = "/ { gsub(/(version = "|")/, ""); print; exit }' "$ROOT/src-tauri/Cargo.toml")"
+TAURI_VER="$(jq -r .version "$ROOT/src-tauri/tauri.conf.json")"
+if [ "$PKG_VER" != "$CARGO_VER" ] || [ "$CARGO_VER" != "$TAURI_VER" ]; then
+  echo "error: version mismatch: package.json=$PKG_VER Cargo.toml=$CARGO_VER tauri.conf.json=$TAURI_VER" >&2
+  echo "run scripts/bump-version.sh <version> to sync all three" >&2
+  exit 1
+fi
+echo "==> Building v$TAURI_VER"
+
 echo "==> Building, signing, notarizing, stapling (this takes a few minutes)"
 cd "$ROOT"
 npm run tauri build
