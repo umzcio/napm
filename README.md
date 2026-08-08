@@ -90,6 +90,14 @@ Everything underneath is real: real scans, real publishers, real on-disk sizes, 
 
 ---
 
+## What napm sends
+
+To check your tools, napm sends package names and versions to OSV.dev for the advisory scan, registry.npmjs.org and pypi.org for versions and changelogs, formulae.brew.sh for the brew catalog, and api.github.com for release notes and the supply-chain wire, with your token if you set one. Nothing else leaves your machine, and nothing is sent anywhere else.
+
+The advisory scan is the one that matters most to call out: on every launch it batches your entire installed-package inventory, every name and exact version, to OSV.dev over TLS. That is inherent to the feature, not a bug, but it is still a fingerprint of your machine leaving by default with no prompt. If you would rather not send it, turn off "Scan installed tools against the OSV advisory database" in Preferences. Turning it off does not mean your tools are safe, it means napm did not check, and the What's New feed says so plainly instead of showing a false all-clear.
+
+---
+
 ## See It In Action
 
 **The menu bar and View filters** in motion: rescan, scope the library by source, sort, and toggle what shows:
