@@ -1,6 +1,6 @@
 {
   "name": "napm",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "A peer-to-peer package manager for your command-line dev tools.",
   "license": "MIT",
   "private": true,
