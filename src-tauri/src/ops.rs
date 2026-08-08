@@ -92,6 +92,17 @@ pub fn build_command(
     }
 }
 
+/// Render a (program, args) pair as the shell-ish string shown to the user,
+/// e.g. `display_command("pip3", &["install".into(), "httpie==3.2.2".into()])`
+/// -> "pip3 install httpie==3.2.2". Display only, not re-parsed or re-executed.
+fn display_command(prog: &str, args: &[String]) -> String {
+    if args.is_empty() {
+        prog.to_string()
+    } else {
+        format!("{} {}", prog, args.join(" "))
+    }
+}
+
 use serde::Serialize;
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader};
@@ -197,6 +208,14 @@ pub fn run_op(
             Some(c) => c,
             None => {
                 let _ = app.emit(
+                    "transfer-line",
+                    LineEvent {
+                        op_id: op_id.clone(),
+                        stream: "stderr".into(),
+                        line: format!("unsupported operation: {} {}", eco, action),
+                    },
+                );
+                let _ = app.emit(
                     "transfer-done",
                     DoneEvent {
                         op_id: op_id.clone(),
@@ -235,6 +254,18 @@ pub fn run_op(
                 return;
             }
         };
+
+        // The command actually executed, as the first line of output, so the
+        // Transfers row shows the truth rather than a string reconstructed in
+        // JS (which never knew, e.g., that pip resolved to "pip3").
+        let _ = app.emit(
+            "transfer-line",
+            LineEvent {
+                op_id: op_id.clone(),
+                stream: "stdout".into(),
+                line: format!("$ {}", display_command(&prog, &args)),
+            },
+        );
 
         let mut handles = Vec::new();
         if let Some(pipe) = child.stdout.take() {
@@ -397,6 +428,20 @@ mod tests {
     #[test]
     fn rejects_leading_dash_version() {
         assert!(build_command("npm", "typescript", "-1.0.0", "update", "pip3").is_none());
+    }
+
+    #[test]
+    fn display_command_uses_the_resolved_pip_binary() {
+        let args = vec!["install".to_string(), "httpie==3.2.2".to_string()];
+        assert_eq!(
+            display_command("pip3", &args),
+            "pip3 install httpie==3.2.2"
+        );
+    }
+
+    #[test]
+    fn display_command_with_no_args_is_just_the_program() {
+        assert_eq!(display_command("brew", &[]), "brew");
     }
 
     // IN_FLIGHT is process-global state shared across these tests, and tests
