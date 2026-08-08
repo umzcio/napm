@@ -334,6 +334,11 @@
   function handleFor(n){ var h=0; for(var i=0;i<n.length;i++) h=(h*31+n.charCodeAt(i))>>>0; return HANDLES[h%HANDLES.length]; }
   function fmtDl(n){ if(n>=1e6) return (n/1e6).toFixed(n>=1e7?0:1).replace(/\.0$/,"")+"M"; if(n>=1e3) return Math.round(n/1e3)+"K"; return ""+n; }
   function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
+  // Tagged template: every ${} interpolation is HTML-escaped. Interpolate
+  // pre-built trusted HTML by wrapping it in raw(): h`<td>${raw(btnHtml)}</td>`.
+  // (ES6 tagged templates; fine in the shipped WKWebView.)
+  function raw(s){ return {__raw:String(s)}; }
+  function h(strings){ var out=strings[0]; for(var i=1;i<arguments.length;i++){ var v=arguments[i]; out+=(v&&v.__raw!==undefined)?v.__raw:esc(v==null?"":v); out+=strings[i]; } return out; }
   function ago(ts){ if(!ts) return "—"; var d=Math.floor((Date.now()/1000-ts)/86400);
     if(d<0) d=0; if(d<1) return "today"; if(d<7) return d+"d"; if(d<30) return Math.floor(d/7)+"w";
     if(d<365) return Math.floor(d/30)+"mo"; return Math.floor(d/365)+"y"; }
@@ -387,25 +392,27 @@
       var kind = (st==="update"&&!npx) ? bumpKind(t.installed,t.latest) : "none";
       var safe = st==="update" && !npx && isSafe(kind);
       var held = st==="update" && !npx && !safe;
-      var drift = (npx && NPX_DRIFT[t.pkg]) ? '<div class="muted" style="font-size:11px">cached v'+esc(t.installed)+', npx pulls v'+esc(NPX_DRIFT[t.pkg])+' on next run</div>' : '';
+      var drift = (npx && NPX_DRIFT[t.pkg]) ? h`<div class="muted" style="font-size:11px">cached v${t.installed}, npx pulls v${NPX_DRIFT[t.pkg]} on next run</div>` : '';
       var g = manual?["?","g-man"] : npx?["♪","g-off"] : st==="update" ? (safe?["↑","g-safe"]:["↑","g-hold"]) : GLYPH[st];
       var gTitle = manual?"unmanaged (no package manager owns this)" : (st==="update"&&!npx) ? kind+" update"+(held?" - above your appetite":"") : "";
+      var gTitleAttr = gTitle ? h` title="${gTitle}"` : '';
       var tr=document.createElement("tr"); tr.dataset.i=i;
       if(selected===i) tr.className="sel";
       var action = (manual||npx) ? '<span class="muted">—</span>'
-                 : st==="update" ? '<button class="btn rowbtn" data-get="'+i+'">Get</button>'
-                 : off ? '<button class="btn rowbtn" data-get="'+i+'">Install</button>' : '<span class="muted">—</span>';
+                 : st==="update" ? h`<button class="btn rowbtn" data-get="${i}">Get</button>`
+                 : off ? h`<button class="btn rowbtn" data-get="${i}">Install</button>` : '<span class="muted">—</span>';
+      var descHtml = (VIEW.desc && t.description) ? h`<span class="toold">${t.description}</span>` : '';
+      var pinCell = manual ? '<span class="muted">—</span>' : h`<span class="pin ${t.pinned?'on':''}" data-pin="${i}" title="freeze version, skip Update All">📌</span>`;
       tr.innerHTML=
-        '<td class="glyph '+g[1]+'"'+(gTitle?' title="'+esc(gTitle)+'"':'')+'>'+g[0]+'</td>'+
-        '<td>'+(t.pinned?'📌 ':'')+esc(t.name)+' <span class="src '+esc(t.eco)+'">'+esc(t.eco)+'</span>'+
-          (VIEW.desc&&t.description?'<span class="toold">'+esc(t.description)+'</span>':'')+drift+'</td>'+
-        '<td class="'+(off?'muted':'')+'">'+esc(t.installed||"—")+'</td>'+
-        '<td class="'+((npx||manual)?'muted':safe?'vernew':held?'verhold':'muted')+'">'+((npx||manual)?"—":esc(t.latest))+'</td>'+
-        '<td class="user'+(t.publisher?'':' muted')+'">@'+esc(t.publisher||"unknown")+'</td>'+
-        '<td class="muted">'+esc(t.size)+'</td>'+
-        '<td class="muted">'+ago(t.updated)+'</td>'+
-        '<td>'+(manual?'<span class="muted">—</span>':'<span class="pin '+(t.pinned?'on':'')+'" data-pin="'+i+'" title="freeze version, skip Update All">📌</span>')+'</td>'+
-        '<td>'+action+'</td>';
+        h`<td class="glyph ${g[1]}"${raw(gTitleAttr)}>${g[0]}</td>`+
+        h`<td>${raw(t.pinned?'📌 ':'')}${t.name} <span class="src ${t.eco}">${t.eco}</span>${raw(descHtml)}${raw(drift)}</td>`+
+        h`<td class="${off?'muted':''}">${t.installed||"—"}</td>`+
+        h`<td class="${(npx||manual)?'muted':safe?'vernew':held?'verhold':'muted'}">${(npx||manual)?"—":t.latest}</td>`+
+        h`<td class="user${t.publisher?'':' muted'}">@${t.publisher||"unknown"}</td>`+
+        h`<td class="muted">${t.size}</td>`+
+        h`<td class="muted">${raw(ago(t.updated))}</td>`+
+        h`<td>${raw(pinCell)}</td>`+
+        h`<td>${raw(action)}</td>`;
       tr.addEventListener("click",function(){selected=i; renderRows();});
       rowsEl.appendChild(tr);
     });
@@ -442,25 +449,25 @@
     if(!q){ runSearch(""); return; }
     var hits=SWARM.filter(function(p){ return searchSource==="all" || p.eco===searchSource; });
     if(!hits.length){
-      resEl.innerHTML='<div class="empty">No peers are sharing "'+esc(lastQuery)+'"'+(searchSource!=="all"?(' on '+searchSource):'')+'. Try another term.</div>';
+      resEl.innerHTML=h`<div class="empty">No peers are sharing "${lastQuery}"${raw(searchSource!=="all"?(' on '+searchSource):'')}. Try another term.</div>`;
       return;
     }
     var body=hits.map(function(p){
       var ti=findToolIdx(p.pkg, p.eco), inLib = ti>=0 && TOOLS[ti].installed;
       var outdated = ti>=0 && statusOf(TOOLS[ti])==="update";
       var act = inLib && !outdated ? '<span class="g-ok">&#10003; in library</span>'
-              : outdated ? '<button class="btn rowbtn" data-install="'+esc(p.pkg)+'">Update</button>'
-              : '<button class="btn rowbtn" data-install="'+esc(p.pkg)+'">Get</button>';
+              : outdated ? h`<button class="btn rowbtn" data-install="${p.pkg}">Update</button>`
+              : h`<button class="btn rowbtn" data-install="${p.pkg}">Get</button>`;
       var fire = p.weeklyDownloads>=5e6 ? ' <span class="fire" title="heavily shared">&#128293;</span>' : '';
       var pipTag = p.eco==="pip" ? ' <span class="exact" title="pip has no search API; matched by exact name">exact match</span>' : '';
-      return '<tr data-pkg="'+esc(p.pkg)+'">'+
+      return h`<tr data-pkg="${p.pkg}">`+
         '<td class="glyph g-off">&#9834;</td>'+
-        '<td class="pkgcell"><b>'+esc(p.name)+'</b>'+fire+pipTag+' <span class="muted">'+esc(p.pkg)+'</span><span class="desc">'+esc(p.description)+'</span></td>'+
-        '<td class="user">'+esc(p.version)+'</td>'+
-        '<td class="dl">'+fmtDl(p.weeklyDownloads)+'</td>'+
-        '<td><span class="src '+esc(p.eco)+'">'+esc(p.eco)+'</span></td>'+
-        '<td class="muted">'+(p.size||"—")+'</td>'+
-        '<td>'+act+'</td></tr>';
+        h`<td class="pkgcell"><b>${p.name}</b>${raw(fire)}${raw(pipTag)} <span class="muted">${p.pkg}</span><span class="desc">${p.description}</span></td>`+
+        h`<td class="user">${p.version}</td>`+
+        h`<td class="dl">${raw(fmtDl(p.weeklyDownloads))}</td>`+
+        h`<td><span class="src ${p.eco}">${p.eco}</span></td>`+
+        h`<td class="muted">${p.size||"—"}</td>`+
+        h`<td>${raw(act)}</td></tr>`;
     }).join("");
     resEl.innerHTML='<table><thead><tr><th></th><th>Package</th><th>Version</th><th>Downloads/wk</th><th>Source</th><th>Size</th><th></th></tr></thead><tbody>'+body+'</tbody></table>';
   }
@@ -565,10 +572,10 @@
     // Wire strip.
     if(WIRE.length){
       var items=WIRE.slice(0,8).map(function(w){
-        return '<div class="wire-item"><span class="src '+esc(w.eco)+'">'+esc(w.eco)+'</span> '+
-          esc(w.summary||w.id)+(w.published?'<span class="wire-date">'+esc(w.published.slice(0,10))+'</span>':'')+'</div>';
+        var pubHtml = w.published ? h`<span class="wire-date">${w.published.slice(0,10)}</span>` : '';
+        return h`<div class="wire-item"><span class="src ${w.eco}">${w.eco}</span> ${w.summary||w.id}${raw(pubHtml)}</div>`;
       }).join("");
-      f.innerHTML+='<div class="wire"><div class="wire-h">\ud83d\udce1 supply-chain wire</div>'+items+'</div>';
+      f.innerHTML+=h`<div class="wire"><div class="wire-h">\ud83d\udce1 supply-chain wire</div>${raw(items)}</div>`;
     } else if(!WIRE_OK){
       f.innerHTML+='<div class="wire"><div class="wire-h">\ud83d\udce1 supply-chain wire</div><div class="wire-item muted">wire unavailable</div></div>';
     }
@@ -581,31 +588,31 @@
     }
     FEED.forEach(function(it,idx){
       var nm=it.ti>=0?TOOLS[it.ti].name:it.pkg;
-      var verline=it.ti>=0&&TOOLS[it.ti].installed?(esc(TOOLS[it.ti].installed)+' \u2192 '+esc(it.fix||TOOLS[it.ti].latest)):esc(it.fix||"");
+      var verline=it.ti>=0&&TOOLS[it.ti].installed?h`${TOOLS[it.ti].installed} \u2192 ${it.fix||TOOLS[it.ti].latest}`:h`${it.fix||""}`;
       var r=REC[it.rec]||REC["new"];
       var isAlert=!!it.id;
       var actLabel = it.fix?("Get "+it.fix):(it.ti>=0?("Get "+TOOLS[it.ti].latest):"Get");
       var act = (it.rec==="malicious"&&it.detailLoaded&&!it.fix)
-        ? '<div class="signal danger" style="margin-top:8px">No safe version published. Remove it: <code>'+esc(removeCmd(it))+'</code></div>'
-        : (it.ti>=0?'<button class="btn rowbtn" style="margin-top:8px" data-getfeed="'+idx+'">'+esc(actLabel)+'</button>':'');
+        ? h`<div class="signal danger" style="margin-top:8px">No safe version published. Remove it: <code>${removeCmd(it)}</code></div>`
+        : (it.ti>=0?h`<button class="btn rowbtn" style="margin-top:8px" data-getfeed="${idx}">${actLabel}</button>`:'');
       var body;
       if(isAlert){
-        var txt = it.fix ? ("fixed in "+esc(it.fix))
+        var txt = it.fix ? h`fixed in ${it.fix}`
           : it.detailFailed ? "advisory detail unavailable"
           : !it.detailLoaded ? "expand for advisory detail"
           : it.rec==="malicious" ? "no fixed version published, consider removing"
           : "no fixed version listed in the advisory";
-        body='<div>'+esc(it.blurb)+'</div><div class="signal '+(it.rec==="malicious"?"danger":"warn")+'"><span class="lbl">'+esc(it.id)+':</span> '+txt+'</div>'+act;
+        body=h`<div>${it.blurb}</div><div class="signal ${it.rec==="malicious"?"danger":"warn"}"><span class="lbl">${it.id}:</span> ${raw(txt)}</div>`+act;
       } else {
-        var log=it.changelog.length?('<ul>'+it.changelog.map(function(c){return '<li>'+esc(c)+'</li>';}).join("")+'</ul>')
+        var log=it.changelog.length?('<ul>'+it.changelog.map(function(c){return h`<li>${c}</li>`;}).join("")+'</ul>')
           :(it.loaded?'<div class="muted">No changelog available.</div>':'<div class="muted">Expand to load changelog\u2026</div>');
-        body='<div>'+esc(it.blurb)+'</div><div style="font-weight:bold;margin-top:6px">What changed</div>'+log+act;
+        body=h`<div>${it.blurb}</div><div style="font-weight:bold;margin-top:6px">What changed</div>`+log+act;
       }
       var card=document.createElement("div"); card.className="card raised"+(it.open?" open":"");
-      card.innerHTML='<div class="card-h" data-card="'+idx+'"><span class="caret">'+(it.open?"–":"+")+'</span>'+
-        '<span class="nm">'+esc(nm)+'</span><span class="ver">'+verline+'</span>'+
-        '<span class="age">'+esc(it.age)+'</span><span class="rec '+r[1]+'">'+r[0]+'</span></div>'+
-        '<div class="card-b">'+body+'</div>';
+      card.innerHTML=h`<div class="card-h" data-card="${idx}"><span class="caret">${it.open?"–":"+"}</span>`+
+        h`<span class="nm">${nm}</span><span class="ver">${raw(verline)}</span>`+
+        h`<span class="age">${it.age}</span><span class="rec ${r[1]}">${r[0]}</span></div>`+
+        h`<div class="card-b">${raw(body)}</div>`;
       f.appendChild(card);
     });
   }
