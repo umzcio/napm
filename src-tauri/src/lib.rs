@@ -1,4 +1,5 @@
 mod http;
+mod importer;
 mod intel;
 mod ops;
 mod pathenv;
@@ -146,6 +147,28 @@ fn export_library(
         .arg(&path)
         .spawn();
     Ok(path.to_string_lossy().to_string())
+}
+
+/// Parse+validate an import manifest, then bucket its rows against a fresh
+/// scan: already-installed (eco-aware match), will-install (not present, not
+/// pinned to the manifest's old version -- see importer's module doc), or
+/// cannot-install (manual/npx/unknown eco, or a malformed row) with a reason.
+/// Best-effort network resolution upgrades each will-install row's version to
+/// the ecosystem's current latest; a failed lookup keeps the manifest's
+/// recorded version rather than blocking the whole import.
+#[tauri::command(async)]
+fn import_preview(
+    app: tauri::AppHandle,
+    manifest_json: String,
+) -> Result<importer::ImportPreview, String> {
+    let manifest = importer::parse_manifest(&manifest_json)?;
+    let store = open_store(&app);
+    let pins = store.pins();
+    let settings = store.settings();
+    let installed = scan::scan_all(&pins, settings.sources, settings.probe_manual, store.dir());
+    let mut preview = importer::classify(&manifest, &installed);
+    importer::resolve_latest_for_will_install(&mut preview, store.dir());
+    Ok(preview)
 }
 
 #[tauri::command(async)]
@@ -340,6 +363,7 @@ pub fn run() {
             get_settings,
             set_settings,
             export_library,
+            import_preview,
             reveal_in_finder,
             check_for_update,
             install_update,
