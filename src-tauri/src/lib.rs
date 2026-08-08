@@ -81,7 +81,8 @@ fn get_whats_new(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    intel::whats_new(&installed, &verdict_scope, &dir, now)
+    let advisories_enabled = open_store(&app).settings().advisory_checks;
+    intel::whats_new(&installed, &verdict_scope, &dir, now, advisories_enabled)
 }
 
 #[tauri::command(async)]

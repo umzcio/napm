@@ -319,6 +319,7 @@
   var FEED=[];
   var WIRE=[];
   var SECURITY_OK=true;
+  var SECURITY_DISABLED=false;
   var WIRE_OK=true;
   // Bumped on every loadWhatsNew() call; a stale response whose gen no longer
   // matches is dropped instead of clobbering a reload triggered while it was
@@ -548,7 +549,7 @@
     }).map(function(t){ return t.pkg; });
   }
   function loadWhatsNew(){
-    if(!inv()){ FEED=[]; WIRE=[]; SECURITY_OK=false; WIRE_OK=false; renderFeed(); return; }
+    if(!inv()){ FEED=[]; WIRE=[]; SECURITY_OK=false; SECURITY_DISABLED=false; WIRE_OK=false; renderFeed(); return; }
     var gen=++feedGen;
     document.getElementById("feed").innerHTML='<div class="searching">Checking the swarm for advisories…</div>';
     var installed=TOOLS.filter(function(t){return t.installed && t.eco!=="manual";}).map(function(t){
@@ -558,6 +559,7 @@
       if(gen!==feedGen) return;
       r=r||{};
       SECURITY_OK = r.securityOk!==false;
+      SECURITY_DISABLED = !!r.securityDisabled;
       WIRE_OK = r.wireOk!==false;
       WIRE = r.wire||[];
       // Build FEED items (cards) from alerts first, then verdicts.
@@ -581,7 +583,7 @@
       FEED=feed; renderFeed(); renderStatus();
     }).catch(function(){
       if(gen!==feedGen) return;
-      FEED=[]; WIRE=[]; SECURITY_OK=false; WIRE_OK=false; renderFeed();
+      FEED=[]; WIRE=[]; SECURITY_OK=false; SECURITY_DISABLED=false; WIRE_OK=false; renderFeed();
     });
   }
   function reBlurb(v){
@@ -604,7 +606,9 @@
     } else if(!WIRE_OK){
       f.innerHTML+='<div class="wire"><div class="wire-h">\ud83d\udce1 supply-chain wire</div><div class="wire-item muted">wire unavailable</div></div>';
     }
-    if(!SECURITY_OK){
+    if(SECURITY_DISABLED){
+      f.innerHTML+='<div class="signal danger" style="margin:6px 0"><span class="lbl">security:</span> advisory scan is off in Preferences, so this is not an all-clear.</div>';
+    } else if(!SECURITY_OK){
       f.innerHTML+='<div class="signal danger" style="margin:6px 0"><span class="lbl">security:</span> check unavailable: could not reach the advisory database, so this is not an all-clear.</div>';
     }
     if(!FEED.length){
@@ -1173,6 +1177,8 @@
       '<label style="display:block;margin-top:4px;font-size:11px"><input type="checkbox" id="prefTokenShow"> show</label></div>'+
       '<div style="margin-top:10px"><b>Sources</b>'+rows+'</div>'+
       '<div style="margin-top:10px"><label style="display:block"><input type="checkbox" id="prefProbeManual"'+(s.probeManual!==false?' checked':'')+'> Run manual tools with --version to read their version (executes binaries found on your PATH)</label></div>'+
+      '<div style="margin-top:10px"><label style="display:block"><input type="checkbox" id="prefAdvisoryChecks"'+(s.advisoryChecks!==false?' checked':'')+'> Scan installed tools against the OSV advisory database</label>'+
+      '<div class="muted" style="font-size:11px">sends package names and versions to OSV.dev on every scan. off means no all-clear, just no check.</div></div>'+
       '<div style="margin-top:12px;text-align:right"><button class="btn" data-close>Cancel</button> <button class="btn primary" data-prefs-save>Save</button></div>'+
       '</div>';
     document.getElementById("modalBack").style.display="flex";
@@ -1210,7 +1216,8 @@
           npx:document.getElementById("prefSrc_npx").checked,
           manual:document.getElementById("prefSrc_manual").checked
         },
-        probeManual:document.getElementById("prefProbeManual").checked
+        probeManual:document.getElementById("prefProbeManual").checked,
+        advisoryChecks:document.getElementById("prefAdvisoryChecks").checked
       };
       SETTINGS=settings; // View menu's "off in Preferences" greying reflects the save immediately
       closeModal();
