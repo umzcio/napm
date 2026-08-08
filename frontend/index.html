@@ -1143,7 +1143,8 @@
     box.innerHTML='<div class="m-h">Preferences<span class="x" data-close>×</span></div>'+
       '<div class="m-b">'+
       '<div><b>GitHub token</b><div class="muted" style="font-size:11px">optional - raises the GitHub API rate limit for changelogs and the supply-chain wire.</div>'+
-      '<input id="prefToken" class="search" style="width:100%;margin-top:4px" value="'+esc(s.githubToken||"")+'"></div>'+
+      '<input id="prefToken" type="password" class="search" style="width:100%;margin-top:4px" value="'+esc(s.githubToken||"")+'">'+
+      '<label style="display:block;margin-top:4px;font-size:11px"><input type="checkbox" id="prefTokenShow"> show</label></div>'+
       '<div style="margin-top:10px"><b>Sources</b>'+rows+'</div>'+
       '<div style="margin-top:12px;text-align:right"><button class="btn" data-close>Cancel</button> <button class="btn primary" data-prefs-save>Save</button></div>'+
       '</div>';
@@ -1166,6 +1167,11 @@
     document.getElementById("modalBack").style.display="flex";
   };
   document.getElementById("modalBack").addEventListener("click",function(e){
+    if(e.target.id==="prefTokenShow"){
+      var tok=document.getElementById("prefToken");
+      if(tok) tok.type=e.target.checked?"text":"password";
+      return;
+    }
     if(e.target.hasAttribute("data-prefs-save")){
       var settings={
         githubToken:(document.getElementById("prefToken").value||"").trim(),
