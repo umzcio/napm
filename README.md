@@ -8,7 +8,7 @@
 
 <p align="center">
   <strong>napm is the npstr AI Package Manager: the desktop package manager that thinks it is a 1999 file-sharing client.</strong><br/>
-  Track and update every command-line dev tool you have across npm, Homebrew, pip, npx, and manual installs, in one place. See what is outdated, whether the update is safe to take, whether anything you are holding is compromised, and roll back when an update goes wrong.<br/><br/>
+  Track and update every command-line dev tool you have across npm, Homebrew, pip, npx, cargo, and manual installs, in one place. See what is outdated, whether the update is safe to take, whether anything you are holding is compromised, and roll back when an update goes wrong.<br/><br/>
   Your CLIs are the files. The registry is the swarm. Updating is a download.
 </p>
 
@@ -24,19 +24,19 @@
   <img src="https://img.shields.io/github/v/release/umzcio/napm?style=flat-square&color=3A32FF&label=release" alt="Latest release" />
   <img src="https://img.shields.io/badge/license-MIT-3A32FF?style=flat-square" alt="MIT" />
   <img src="https://img.shields.io/badge/stack-Tauri%202%20%7C%20Rust%20%7C%20Vanilla%20JS-6A1BFF?style=flat-square" alt="Stack" />
-  <img src="https://img.shields.io/badge/sources-npm%20%7C%20brew%20%7C%20pip%20%7C%20npx%20%7C%20manual-1B5CFF?style=flat-square" alt="Sources" />
+  <img src="https://img.shields.io/badge/sources-npm%20%7C%20brew%20%7C%20pip%20%7C%20npx%20%7C%20cargo%20%7C%20manual-1B5CFF?style=flat-square" alt="Sources" />
   <img src="https://img.shields.io/badge/platform-macOS%20(Apple%20silicon)-080a0f?style=flat-square" alt="macOS" />
 </p>
 
 <p align="center">
-  <img src="docs/media/shared-library.png" alt="napm Shared Library: installed CLI tools across npm, brew, pip, npx, and manual installs, with installed vs latest versions, a status glyph, the real publisher, on-disk size, and the Update Appetite dial" width="900" />
+  <img src="docs/media/shared-library.png" alt="napm Shared Library: installed CLI tools across npm, brew, pip, npx, cargo, and manual installs, with installed vs latest versions, a status glyph, the real publisher, on-disk size, and the Update Appetite dial" width="900" />
 </p>
 
 ---
 
 ## Why
 
-Every developer accumulates a drawer of command-line tools: a dozen npm globals, a hundred Homebrew formulae, pip utilities, the occasional `npx` one-off, and a few things a `curl | bash` script dropped on your PATH. Nothing tracks them as one set. `npm outdated`, `brew outdated`, and `pip list --outdated` each answer for their own corner, none of them tell you whether an update is safe to take, and not one of them can answer the question you actually have at 2am: "this tool started misbehaving, what changed and when."
+Every developer accumulates a drawer of command-line tools: a dozen npm globals, a hundred Homebrew formulae, pip utilities, a handful of `cargo install`ed Rust binaries, the occasional `npx` one-off, and a few things a `curl | bash` script dropped on your PATH. Nothing tracks them as one set. `npm outdated`, `brew outdated`, and `pip list --outdated` each answer for their own corner, none of them tell you whether an update is safe to take, and not one of them can answer the question you actually have at 2am: "this tool started misbehaving, what changed and when."
 
 napm is that single view. It scans every ecosystem you use, tells you what is current, outdated, or unmanaged, scores whether each update is safe to take, scans everything you have installed against a live vulnerability database, and logs every version change so a regression has a paper trail. Then it wears all of that as a late-90s peer-to-peer file-sharing client, because the metaphor is exact: your installed tools are a Shared Library, a newer release is a peer with a better copy, taking an update is a download, and the heavily-downloaded package is the safe grab with a flame next to it.
 
@@ -47,12 +47,13 @@ Everything underneath is real: real scans, real publishers, real on-disk sizes, 
 ## Features
 
 ### Shared Library (the installed view)
-- **Five sources, one view**: npm, Homebrew, pip, and npx scanned with one batch command each, plus a best-effort **manual / unmanaged** source that sweeps `$PATH` for tools no package manager owns (the `curl | bash` installs)
+- **Six sources, one view**: npm, Homebrew, pip, and npx scanned with one batch command each; cargo read from its own `.crates2.json` install manifest (falling back to `cargo install --list`), with "latest" resolved per crate against crates.io since cargo has no batch outdated command; plus a best-effort **manual / unmanaged** source that sweeps `$PATH` for tools no package manager owns (the `curl | bash` installs)
 - **Honest status** per tool: current, update available, offline, or unmanaged, with a glyph and a real installed-vs-latest comparison that never flags a downgrade as an update
 - **Real metadata, every column**: the **Shared By** handle is the package's actual publisher (from offline metadata), **Size** is the real on-disk footprint, **Updated** is when the tool last changed on disk, and each row carries its real one-line description
 - **Update Appetite dial**: the old throttle slider, made real. Set how big a version jump counts as safe (patch only, up to minor, or bleeding edge), computed from semver distance. It re-classifies the library live and scopes Update All
 - **Pins**: freeze a tool's version so Update All skips it, while it still shows as outdated so you never lose track
 - **npx as a first-class source**: tools you have run via `npx` appear with their cached version
+- **Honest about git/path crates**: a `cargo install --git` or `--path` crate has no registry version to compare against, so it shows no update path instead of a guessed one
 - **View controls**: filter to only tools you installed (hides Homebrew dependencies), only outdated, or by source; sort by name, size, updated, or status
 
 ### What's New (the decision feed)
@@ -64,24 +65,26 @@ Everything underneath is real: real scans, real publishers, real on-disk sizes, 
 ### Search the swarm (registry discovery)
 - **Federated** across npm and the Homebrew catalog by default, with source-filter chips to scope to one registry
 - **Weekly downloads** shown as the popularity and trust signal, with a flame marker on heavily-shared packages, sorted so the safe grab is on top
-- **Honest about pip**: PyPI removed its search API, so pip is exact-name lookup only, labeled as such. napm does not present fuzzy pip search that returns nothing
+- **Honest about pip and cargo**: PyPI removed its search API, so pip is exact-name lookup only, labeled as such. crates.io has no free-text search endpoint this app integrates either, so cargo is the same exact-name lookup, labeled the same way. napm does not present fuzzy search that returns nothing
 - Installing from a result runs the same real Transfers path as everything else
 
 ### Transfers (execution, history, rollback)
 - **Real install, update, and rollback** commands with stdout and stderr streamed live into the active row, and success or failure shown from the actual exit code, not a fake progress bar
-- **Persistent history** of every install, update, and rollback with a timestamp and a from/to, so "what changed and when" is answerable
-- **Rollback** for npm (`npm i -g pkg@ver`) and pip (`pip install pkg==ver`). Homebrew is gated honestly, since it keeps no old bottles and cannot reliably downgrade
+- **Uninstall**: `npm rm -g`, `pip uninstall -y`, `brew uninstall`, or `cargo uninstall`, run for real. Before a brew uninstall, napm checks `brew uses --installed` and disables the action with the dependent list if other formulae depend on it, rather than offering it and letting it fail. napm also refuses to uninstall its own toolchain (npm, corepack, pip, setuptools, wheel)
+- **Persistent history** of every install, update, uninstall, and rollback with a timestamp and a from/to, so "what changed and when" is answerable. An uninstall can itself be rolled back (reinstalling the prior version) for the ecosystems that support rollback
+- **Rollback** for npm (`npm i -g pkg@ver`), pip (`pip install pkg==ver`), and cargo (`cargo install --version ver`), which genuinely supports installing an arbitrary prior version. Homebrew is gated honestly, since it keeps no old bottles and cannot reliably downgrade
 
 ### Throughout
 - **Menu bar** (File / Edit / View / Swarm / Help): rescan, open the data folder, refresh registry caches, About, and the persisted View filters above
 - **Right-click context menus** on every meaningful row, with only the actions that apply (inapplicable ones greyed with a reason, never faked)
 - **Preferences**: a GitHub token (raises the API rate limit for changelogs and the wire) and per-source enable / disable toggles, persisted
-- **Export library** to JSON or Markdown
+- **Export library** to JSON or Markdown, or as a versioned import manifest
+- **Import a library manifest**: previews every row into will install, already present, or cannot install with a reason, then installs sequentially and reports a summary that names any failures. Version pinning is deliberately not part of v1, since Homebrew cannot honor a pin and a manifest where most rows respect one and one silently cannot would be dishonest; manual and npx rows are excluded from the manifest, since they have no install path
 
 ### Packaging and updates
 - A **signed and notarized** macOS `.dmg` that opens cleanly with no Gatekeeper warning
 - An **in-app auto-updater** that checks on launch and offers the update, plus a manual check in the Help menu. Updates are minisign-signed and verified before they install
-- A **login-shell PATH capture** at startup so a Dock-launched app finds `npm`, `brew`, `pip`, and your manual tools, which a GUI app otherwise cannot
+- A **login-shell PATH capture** at startup so a Dock-launched app finds `npm`, `brew`, `pip`, `cargo`, and your manual tools, which a GUI app otherwise cannot
 
 ### Aesthetic (real underneath)
 - Windows-98 beveled chrome and a VT323 wordmark
@@ -139,7 +142,7 @@ And the dial-up splash on launch, covering the first real scan:
 | **Shell** | Tauri v2 (Rust), a single native macOS window, no Node runtime shipped |
 | **Backend** | Native Rust Tauri commands: `scan`, `search`, `intel`, `ops`, `store`, `pathenv` |
 | **Frontend** | A single vanilla HTML / CSS / JS file (`frontend/index.html`) calling `invoke()` |
-| **Package sources** | npm, Homebrew, pip, npx via `std::process::Command`; manual installs via a `$PATH` sweep |
+| **Package sources** | npm, Homebrew, pip, npx via `std::process::Command`; cargo via its `.crates2.json` install manifest, falling back to `cargo install --list`; manual installs via a `$PATH` sweep |
 | **Security intel** | OSV.dev (batched advisory scan), OpenSSF malicious-packages, GitHub global advisories |
 | **Network** | One process-wide keep-alive `ureq` agent to the npm registry, formulae.brew.sh, PyPI, GitHub, and OSV, cached aggressively in the app-data dir |
 | **Persistence** | Flat JSON in the platform app-data directory (`pins.json`, `history.json`, `settings.json`) plus tiered registry / advisory caches |
@@ -165,12 +168,12 @@ Two layers. A native Rust backend owns every shell call, version comparison, and
               |  scan · search · intel · ops ·    |
               |  store · pathenv                  |
               +------------------+----------------+
-            std::process::Command         shared keep-alive HTTP
-        +--------+--------+--------+----+   +-----------------------+
-        |  npm   |  brew  |  pip   | npx|   | npm registry · PyPI · |
-        +--------+--------+--------+----+   | formulae.brew.sh ·    |
-        |     manual ($PATH sweep)     |   | GitHub · OSV.dev      |
-        +------------------------------+   +-----------------------+
+                    std::process::Command                shared keep-alive HTTP
+        +--------+--------+--------+--------+--------+   +------------------------------+
+        |  npm   |  brew  |  pip   |  npx   | cargo  |   | npm registry · PyPI          |
+        +--------+--------+--------+--------+--------+   | formulae.brew.sh · crates.io |
+        |            manual ($PATH sweep)            |   | GitHub · OSV.dev             |
+        +--------------------------------------------+   +------------------------------+
                                  |
                        +---------+---------+        +------------------+
                        |  JSON app-data    |        |  GitHub Releases |
@@ -237,7 +240,7 @@ napm/
 │   │   ├── http.rs             # one shared keep-alive HTTP agent
 │   │   ├── store.rs            # JSON store: pins / history / settings
 │   │   ├── ops.rs              # streamed install / update / rollback
-│   │   ├── scan/               # one module per source (npm/brew/pip/npx/manual)
+│   │   ├── scan/               # one module per source (npm/brew/pip/npx/cargo/manual)
 │   │   ├── search/             # federated registry search
 │   │   └── intel/              # OSV scan, supply-chain wire, release verdicts
 │   ├── icons/                  # generated from assets/npstr-logo.svg
@@ -254,7 +257,7 @@ napm/
 
 **Why a 90s file-sharing skin?** Nostalgia, honestly. I wanted to recreate that late-90s peer-to-peer feel. It also turns out to be a near-perfect metaphor: a P2P client is a list of files, who has them, which copies are newer, and a queue of transfers. Swap "files" for "CLI tools" and you have a package manager. So the look is genuine homage, and every element that reads as flavor still carries real data underneath.
 
-**Why Tauri and native Rust?** napm needs privileged shell access to run npm, brew, and pip, which rules out a pure browser app. Tauri gives a tiny single-binary native window, and keeping every shell call, version comparison, and status classification in Rust means there is exactly one source of truth and the frontend can never shell out.
+**Why Tauri and native Rust?** napm needs privileged shell access to run npm, brew, pip, and cargo, which rules out a pure browser app. Tauri gives a tiny single-binary native window, and keeping every shell call, version comparison, and status classification in Rust means there is exactly one source of truth and the frontend can never shell out.
 
 **Why capture the login-shell PATH at startup?** A GUI app launched from the Dock does not inherit your shell PATH, it gets a bare `/usr/bin:/bin:/usr/sbin:/sbin`. Without capturing the real PATH first, a packaged napm would find none of your tools. It runs your login shell once at startup, reads its PATH, and sets it before anything spawns.
 
