@@ -23,10 +23,16 @@ pub fn human_size(bytes: u64) -> String {
     }
 }
 
-/// Recursively sum the sizes of all regular files under `path`. Symlinks are
+/// Sum the sizes of all regular files under `path` (recursively), or return a
+/// file's own length when `path` is a regular file itself. Symlinks are
 /// skipped (no following) to avoid loops and double-counting. Returns 0 if the
 /// path does not exist.
 pub fn dir_size(path: &Path) -> u64 {
+    if let Ok(meta) = std::fs::metadata(path) {
+        if meta.is_file() {
+            return meta.len();
+        }
+    }
     let mut total = 0;
     let entries = match std::fs::read_dir(path) {
         Ok(e) => e,
@@ -84,5 +90,22 @@ mod tests {
         let record = "foo/bar.py,sha256=abc,100\nbaz.py,sha256=def,250\nRECORD,,\n";
         assert_eq!(record_total_size(record), 350);
         assert_eq!(record_total_size(""), 0);
+    }
+
+    #[test]
+    fn dir_size_of_a_regular_file_returns_its_own_length() {
+        let mut path = std::env::temp_dir();
+        path.push(format!("napm-dir_size-test-{}", std::process::id()));
+        std::fs::write(&path, b"0123456789").unwrap();
+        let result = dir_size(&path);
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(result, 10);
+    }
+
+    #[test]
+    fn dir_size_missing_path_is_zero() {
+        let mut path = std::env::temp_dir();
+        path.push("napm-dir_size-test-does-not-exist-xyz");
+        assert_eq!(dir_size(&path), 0);
     }
 }
