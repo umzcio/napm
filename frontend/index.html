@@ -1074,6 +1074,12 @@
     copyText([t.name+" ("+t.eco+")", "package: "+t.pkg, "installed: "+(t.installed||"-"),
       "latest: "+t.latest, "publisher: @"+(t.publisher||"unknown"), "size: "+(t.size||"-")].join("\n"));
   }
+  // The ecosystems Import can actually install. Kept in one place so the
+  // manifest export flavor and the frontend's own display logic agree with
+  // what the backend (importer.rs's INSTALLABLE_ECOS) will accept. manual and
+  // npx are real napm sources but have no install path, so a manifest never
+  // carries them -- Import would just have to reject them one row at a time.
+  var INSTALLABLE_ECOS = {npm:1, brew:1, pip:1, cargo:1};
   function exportLibrary(format){
     if(!inv()) return;
     var date=new Date().toISOString().slice(0,10);
@@ -1083,6 +1089,17 @@
       var mdc=function(v){ return String(v).replace(/\|/g,"\\|"); };
       content="# napm library ("+date+")\n\n| Tool | Source | Installed | Latest | Publisher | Size |\n|---|---|---|---|---|---|\n"+
         TOOLS.map(function(t){ return "| "+mdc(t.name)+" | "+mdc(t.eco)+" | "+mdc(t.installed||"-")+" | "+mdc(t.latest)+" | @"+mdc(t.publisher||"unknown")+" | "+mdc(t.size||"-")+" |"; }).join("\n")+"\n";
+    } else if(format==="manifest"){
+      // A dedicated, versioned import-manifest flavor, NOT the raw TOOLS
+      // dump: it carries only what recreating a toolchain elsewhere needs
+      // (pkg/eco/version), never machine-local fields like size/pinned/
+      // updated, and only rows from an ecosystem Import can install --
+      // manual and npx are excluded here, at export time, rather than
+      // silently failing on the other end.
+      fn="napm-import-"+date+".json";
+      var rows=TOOLS.filter(function(t){ return INSTALLABLE_ECOS[t.eco] && t.installed; })
+        .map(function(t){ return {pkg:t.pkg, eco:t.eco, version:t.installed}; });
+      content=JSON.stringify({schema:1, generatedAt:new Date().toISOString(), tools:rows}, null, 2);
     } else {
       fn="napm-library-"+date+".json";
       content=JSON.stringify(TOOLS, null, 2);
