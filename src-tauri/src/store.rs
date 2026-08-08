@@ -92,7 +92,7 @@ impl Store {
     /// History newest-first.
     pub fn history(&self) -> Vec<HistoryEntry> {
         let mut h: Vec<HistoryEntry> = Self::read_json(&self.history_path());
-        h.sort_by(|a, b| b.ts.cmp(&a.ts));
+        h.sort_by_key(|e| std::cmp::Reverse(e.ts));
         h
     }
 
@@ -193,7 +193,7 @@ mod tests {
     #[test]
     fn missing_or_corrupt_files_read_as_empty() {
         let s = temp_store();
-        std::fs::create_dir_all(&s_dir(&s)).unwrap();
+        std::fs::create_dir_all(s_dir(&s)).unwrap();
         std::fs::write(s_dir(&s).join("pins.json"), b"not json").unwrap();
         assert!(s.pins().is_empty()); // corrupt -> empty, no panic
     }
@@ -227,7 +227,7 @@ mod tests {
     #[test]
     fn corrupt_settings_reads_as_defaults() {
         let s = temp_store();
-        std::fs::create_dir_all(&s.dir_for_test()).unwrap();
+        std::fs::create_dir_all(s.dir_for_test()).unwrap();
         std::fs::write(s.dir_for_test().join("settings.json"), b"not json").unwrap();
         let def = s.settings();
         assert_eq!(def.github_token, "");
@@ -239,7 +239,7 @@ mod tests {
         // A settings.json that only disables npm must keep brew/pip/npx/manual on,
         // never drop the unspecified sources to false.
         let s = temp_store();
-        std::fs::create_dir_all(&s.dir_for_test()).unwrap();
+        std::fs::create_dir_all(s.dir_for_test()).unwrap();
         std::fs::write(
             s.dir_for_test().join("settings.json"),
             br#"{"sources":{"npm":false}}"#,

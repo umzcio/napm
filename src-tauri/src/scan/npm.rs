@@ -112,7 +112,7 @@ mod tests {
         assert_eq!(rows[0].eco, "npm");
         assert_eq!(rows[0].installed.as_deref(), Some("5.5.4"));
         assert_eq!(rows[0].latest, "5.5.4");
-        assert_eq!(rows[0].pinned, false);
+        assert!(!rows[0].pinned);
     }
 
     #[test]

@@ -50,7 +50,7 @@ fn capture_login_path() -> Option<String> {
 /// would otherwise clobber the inherited PATH with one unusable entry. (A normal
 /// PATH may contain a space inside a dir name, but then it also has a colon.)
 fn looks_like_path(p: &str) -> bool {
-    p.contains('/') && !(p.contains(' ') && !p.contains(':'))
+    p.contains('/') && (p.contains(':') || !p.contains(' '))
 }
 
 /// Spawn `shell args...`, capture stdout, and kill it if it exceeds `dur`.
