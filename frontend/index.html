@@ -647,8 +647,8 @@
     if(eco==="brew") return "brew install "+pkg;
     return "npm i -g "+pkg+(version?"@"+version:""); // npm / npx
   }
-  function openExt(url){ var i=inv(); if(i && url) i("open_external",{url:url}); }
-  function revealPath(p){ var i=inv(); if(i && p) i("reveal_in_finder",{path:p}); }
+  function openExt(url){ if(inv() && url) call("open_external",{url:url}); }
+  function revealPath(p){ if(inv() && p) call("reveal_in_finder",{path:p}); }
   // Most recent prior version for a tool from the loaded history (newest-first),
   // used by the library Roll back item. Null when none.
   function priorVersion(pkg, eco){
@@ -659,7 +659,8 @@
   function togglePin(i){
     var t=TOOLS[i]; if(!t) return;
     t.pinned=!t.pinned; renderRows();
-    var iv=inv(); if(iv) iv("set_pin",{pkg:t.pkg,pinned:t.pinned});
+    if(!inv()) return;
+    call("set_pin",{pkg:t.pkg,pinned:t.pinned}, function(){ t.pinned=!t.pinned; renderRows(); });
   }
   document.getElementById("feed").addEventListener("click",function(e){
     var h=e.target.closest("[data-card]");
@@ -1004,7 +1005,7 @@
       "latest: "+t.latest, "publisher: @"+(t.publisher||"unknown"), "size: "+(t.size||"-")].join("\n"));
   }
   function exportLibrary(format){
-    var i=inv(); if(!i) return;
+    if(!inv()) return;
     var date=new Date().toISOString().slice(0,10);
     var content, fn;
     if(format==="markdown"){
@@ -1016,12 +1017,12 @@
       fn="napm-library-"+date+".json";
       content=JSON.stringify(TOOLS, null, 2);
     }
-    i("export_library",{filename:fn, content:content});
+    call("export_library",{filename:fn, content:content}).then(function(p){ flashStatus("Exported to "+p); });
   }
   var MENUS = {
     file: [
       {label:"Rescan now", run:function(){ scanLibrary(); }},
-      {label:"Open data folder", run:function(){ var i=inv(); if(i) i("open_data_dir"); }},
+      {label:"Open data folder", run:function(){ if(inv()) call("open_data_dir"); }},
       {label:"Export library (JSON)", run:function(){ exportLibrary("json"); }},
       {label:"Export library (Markdown)", run:function(){ exportLibrary("markdown"); }},
       {sep:true},
@@ -1050,12 +1051,12 @@
       {label:"Show descriptions", checked:function(){return VIEW.desc;}, run:function(){toggleView("desc");}}
     ],
     swarm: [
-      {label:"Refresh registry caches", run:function(){ var i=inv(); if(i) i("clear_caches"); }}
+      {label:"Refresh registry caches", run:function(){ if(inv()) call("clear_caches"); }}
     ],
     help: [
       {label:"About napm", run:function(){ if(window.showAbout) showAbout(); }},
       {label:"Check for updates...", run:function(){ checkForUpdate(true); }},
-      {label:"Repo on GitHub", run:function(){ var i=inv(); if(i) i("open_external",{url:"https://github.com/umzcio/napm"}); }}
+      {label:"Repo on GitHub", run:function(){ openExt("https://github.com/umzcio/napm"); }}
     ]
   };
   var openMenuName=null, popupOpen=false, currentItems=null;
@@ -1170,7 +1171,7 @@
       return;
     }
     if(e.target.id==="modalBack" || e.target.hasAttribute("data-close")) { closeModal(); return; }
-    if(e.target.hasAttribute("data-repo")){ e.preventDefault(); var i=inv(); if(i) i("open_external",{url:"https://github.com/umzcio/napm"}); }
+    if(e.target.hasAttribute("data-repo")){ e.preventDefault(); openExt("https://github.com/umzcio/napm"); }
   });
   // (Escape handling is unified with the menu handler above, layering menu over modal.)
 
