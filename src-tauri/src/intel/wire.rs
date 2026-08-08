@@ -1,24 +1,61 @@
-use std::path::Path;
-use std::time::{Duration, SystemTime};
 use super::WireItem;
 use serde_json::Value;
+use std::path::Path;
+use std::time::{Duration, SystemTime};
 
 /// Parse a GitHub global-advisories array into wire items, tagging each with eco.
 pub fn parse_advisories(json: &str, eco: &str) -> Vec<WireItem> {
-    let v: Value = match serde_json::from_str(json) { Ok(v) => v, Err(_) => return Vec::new() };
-    let arr = match v.as_array() { Some(a) => a, None => return Vec::new() };
-    arr.iter().filter_map(|a| {
-        let id = a.get("ghsa_id").and_then(|x| x.as_str())?;
-        let summary = a.get("summary").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
-        let published = a.get("published_at").and_then(|x| x.as_str()).unwrap_or("").to_string();
-        let link = a.get("html_url").and_then(|x| x.as_str()).unwrap_or("").to_string();
-        let packages = a.get("vulnerabilities").and_then(|x| x.as_array()).map(|vs| {
-            vs.iter().filter_map(|vuln| {
-                vuln.get("package").and_then(|p| p.get("name")).and_then(|n| n.as_str()).map(String::from)
-            }).collect()
-        }).unwrap_or_default();
-        Some(WireItem { id: id.to_string(), eco: eco.to_string(), summary, packages, published, link })
-    }).collect()
+    let v: Value = match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    let arr = match v.as_array() {
+        Some(a) => a,
+        None => return Vec::new(),
+    };
+    arr.iter()
+        .filter_map(|a| {
+            let id = a.get("ghsa_id").and_then(|x| x.as_str())?;
+            let summary = a
+                .get("summary")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let published = a
+                .get("published_at")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string();
+            let link = a
+                .get("html_url")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string();
+            let packages = a
+                .get("vulnerabilities")
+                .and_then(|x| x.as_array())
+                .map(|vs| {
+                    vs.iter()
+                        .filter_map(|vuln| {
+                            vuln.get("package")
+                                .and_then(|p| p.get("name"))
+                                .and_then(|n| n.as_str())
+                                .map(String::from)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            Some(WireItem {
+                id: id.to_string(),
+                eco: eco.to_string(),
+                summary,
+                packages,
+                published,
+                link,
+            })
+        })
+        .collect()
 }
 
 /// Fetch npm and pip malware advisories from GitHub, merge (npm first), sort by
@@ -49,8 +86,10 @@ pub fn fetch_wire(cache_dir: &Path) -> Option<Vec<WireItem>> {
     }
 
     // Stale or missing: attempt fresh fetches.
-    let npm_url = "https://api.github.com/advisories?type=malware&ecosystem=npm&sort=published&per_page=15";
-    let pip_url = "https://api.github.com/advisories?type=malware&ecosystem=pip&sort=published&per_page=15";
+    let npm_url =
+        "https://api.github.com/advisories?type=malware&ecosystem=npm&sort=published&per_page=15";
+    let pip_url =
+        "https://api.github.com/advisories?type=malware&ecosystem=pip&sort=published&per_page=15";
 
     // Build auth header string bindings so references live long enough.
     let token_str: String;
@@ -119,5 +158,7 @@ mod tests {
     }
 
     #[test]
-    fn garbage_is_empty() { assert!(parse_advisories("nope", "npm").is_empty()); }
+    fn garbage_is_empty() {
+        assert!(parse_advisories("nope", "npm").is_empty());
+    }
 }

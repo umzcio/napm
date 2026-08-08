@@ -7,19 +7,40 @@ pub fn parse_pypi(json: &str) -> Option<SearchResult> {
     let v: Value = serde_json::from_str(json).ok()?;
     let info = v.get("info")?;
     let name = info.get("name").and_then(|x| x.as_str())?;
-    if name.is_empty() { return None; }
-    let version = info.get("version").and_then(|x| x.as_str()).unwrap_or("").to_string();
-    let description = info.get("summary").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+    if name.is_empty() {
+        return None;
+    }
+    let version = info
+        .get("version")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    let description = info
+        .get("summary")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     Some(SearchResult {
-        name: name.to_string(), eco: "pip".into(), pkg: name.to_string(),
-        version, weekly_downloads: 0, size: String::new(), description,
+        name: name.to_string(),
+        eco: "pip".into(),
+        pkg: name.to_string(),
+        version,
+        weekly_downloads: 0,
+        size: String::new(),
+        description,
     })
 }
 
 /// Last-week downloads from a pypistats `recent` response, or 0.
 pub fn parse_pip_downloads(json: &str) -> u64 {
-    serde_json::from_str::<Value>(json).ok()
-        .and_then(|v| v.get("data").and_then(|d| d.get("last_week")).and_then(|x| x.as_u64()))
+    serde_json::from_str::<Value>(json)
+        .ok()
+        .and_then(|v| {
+            v.get("data")
+                .and_then(|d| d.get("last_week"))
+                .and_then(|x| x.as_u64())
+        })
         .unwrap_or(0)
 }
 
@@ -27,7 +48,10 @@ pub fn parse_pip_downloads(json: &str) -> u64 {
 /// Returns a single result if the name resolves, empty if not found.
 /// The pip source label in the UI explains the exact-match limitation.
 pub fn search_pip(query: &str) -> Vec<SearchResult> {
-    let body = match crate::http::get(&format!("https://pypi.org/pypi/{}/json", crate::http::encode(query))) {
+    let body = match crate::http::get(&format!(
+        "https://pypi.org/pypi/{}/json",
+        crate::http::encode(query)
+    )) {
         Ok(b) => b,
         Err(_) => return Vec::new(),
     };
@@ -67,7 +91,10 @@ mod tests {
 
     #[test]
     fn parses_last_week_downloads() {
-        assert_eq!(parse_pip_downloads(r#"{"data":{"last_day":1,"last_week":1200000,"last_month":9}}"#), 1200000);
+        assert_eq!(
+            parse_pip_downloads(r#"{"data":{"last_day":1,"last_week":1200000,"last_month":9}}"#),
+            1200000
+        );
         assert_eq!(parse_pip_downloads("nope"), 0);
     }
 }

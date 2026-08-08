@@ -1,7 +1,7 @@
 use super::InstalledTool;
+use serde_json::Value;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
-use serde_json::Value;
 
 /// Merge `npm ls -g --json` (installed) with `npm outdated -g --json` (latest),
 /// mirroring reference/scanner.js scanNpm(). BTreeMap keeps output stable/sorted.

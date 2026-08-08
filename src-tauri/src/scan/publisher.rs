@@ -76,7 +76,11 @@ pub fn author_from_pkg_json(author: &Value) -> Option<String> {
 /// `repository` URL, then the `homepage`. Catches packages (like
 /// @google/gemini-cli) that omit `author` but point at a repo.
 pub fn publisher_from_pkg_json(v: &Value) -> Option<String> {
-    if let Some(h) = v.get("author").and_then(author_from_pkg_json).and_then(|n| to_handle(&n)) {
+    if let Some(h) = v
+        .get("author")
+        .and_then(author_from_pkg_json)
+        .and_then(|n| to_handle(&n))
+    {
         return Some(h);
     }
     // repository may be a string or an object { url: ... }
@@ -85,7 +89,10 @@ pub fn publisher_from_pkg_json(v: &Value) -> Option<String> {
         Some(Value::Object(o)) => o.get("url").and_then(|u| u.as_str()),
         _ => None,
     };
-    if let Some(h) = repo_url.and_then(publisher_from_homepage).and_then(|o| to_handle(&o)) {
+    if let Some(h) = repo_url
+        .and_then(publisher_from_homepage)
+        .and_then(|o| to_handle(&o))
+    {
         return Some(h);
     }
     v.get("homepage")
@@ -116,7 +123,11 @@ pub fn publisher_from_homepage(url: &str) -> Option<String> {
 /// -> "openssl", "https://gnu.org/" -> "gnu". None if there is no dotted host.
 fn domain_label(url: &str) -> Option<String> {
     let after = url.split("://").nth(1).unwrap_or(url);
-    let host = after.split('/').next().unwrap_or("").trim_start_matches("www.");
+    let host = after
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .trim_start_matches("www.");
     let parts: Vec<&str> = host.split('.').filter(|p| !p.is_empty()).collect();
     if parts.len() >= 2 {
         Some(parts[parts.len() - 2].to_string())
@@ -132,7 +143,11 @@ pub fn metadata_field(metadata: &str, field: &str) -> Option<String> {
     for line in metadata.lines() {
         if let Some(rest) = line.strip_prefix(prefix.as_str()) {
             let v = rest.trim();
-            return if v.is_empty() { None } else { Some(v.to_string()) };
+            return if v.is_empty() {
+                None
+            } else {
+                Some(v.to_string())
+            };
         }
     }
     None
@@ -152,8 +167,14 @@ mod tests {
     #[test]
     fn to_handle_normalizes() {
         assert_eq!(to_handle("BurntSushi").as_deref(), Some("burntsushi"));
-        assert_eq!(to_handle("Andrew Gallant").as_deref(), Some("andrew-gallant"));
-        assert_eq!(to_handle("Anthropic, PBC").as_deref(), Some("anthropic-pbc"));
+        assert_eq!(
+            to_handle("Andrew Gallant").as_deref(),
+            Some("andrew-gallant")
+        );
+        assert_eq!(
+            to_handle("Anthropic, PBC").as_deref(),
+            Some("anthropic-pbc")
+        );
         assert_eq!(to_handle("  "), None);
         assert_eq!(to_handle(""), None);
         assert_eq!(to_handle("...!!!"), None);
@@ -165,10 +186,16 @@ mod tests {
             author_name_from_string("Sindre Sorhus <sindre@x.com> (https://x.com)").as_deref(),
             Some("Sindre Sorhus")
         );
-        assert_eq!(author_name_from_string("Plain Name").as_deref(), Some("Plain Name"));
+        assert_eq!(
+            author_name_from_string("Plain Name").as_deref(),
+            Some("Plain Name")
+        );
         assert_eq!(author_name_from_string("<only@email>"), None);
         // a URL stuffed into the author field is not a usable name
-        assert_eq!(author_name_from_string("https://github.com/foo/bar/graphs/contributors"), None);
+        assert_eq!(
+            author_name_from_string("https://github.com/foo/bar/graphs/contributors"),
+            None
+        );
     }
 
     #[test]
@@ -189,7 +216,10 @@ mod tests {
     fn publisher_from_pkg_json_falls_back_to_repository() {
         // no author, but repository points at a github org (the gemini-cli case)
         let v = json!({"repository":{"type":"git","url":"git+https://github.com/google-gemini/gemini-cli.git"}});
-        assert_eq!(publisher_from_pkg_json(&v).as_deref(), Some("google-gemini"));
+        assert_eq!(
+            publisher_from_pkg_json(&v).as_deref(),
+            Some("google-gemini")
+        );
         // author wins when present
         let v2 = json!({"author":"Anthropic","repository":{"url":"https://github.com/x/y"}});
         assert_eq!(publisher_from_pkg_json(&v2).as_deref(), Some("anthropic"));
@@ -215,7 +245,10 @@ mod tests {
             publisher_from_homepage("https://www.openssl.org/").as_deref(),
             Some("openssl")
         );
-        assert_eq!(publisher_from_homepage("https://gnu.org/software/wget/").as_deref(), Some("gnu"));
+        assert_eq!(
+            publisher_from_homepage("https://gnu.org/software/wget/").as_deref(),
+            Some("gnu")
+        );
         assert_eq!(publisher_from_homepage("not a url"), None);
     }
 

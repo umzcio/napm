@@ -1,12 +1,15 @@
 use super::InstalledTool;
+use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs;
-use serde_json::Value;
 
 /// npm registry doc -> `dist-tags.latest`, the version npx resolves for `@latest`.
 pub fn parse_dist_tag_latest(json: &str) -> Option<String> {
     let v: Value = serde_json::from_str(json).ok()?;
-    v.get("dist-tags")?.get("latest")?.as_str().map(String::from)
+    v.get("dist-tags")?
+        .get("latest")?
+        .as_str()
+        .map(String::from)
 }
 
 /// Strip the trailing `@version` from an npx package spec, preserving scoped
@@ -60,7 +63,11 @@ pub fn scan_npx() -> Vec<InstalledTool> {
             Ok(v) => v,
             Err(_) => continue,
         };
-        let specs = match shim.get("_npx").and_then(|n| n.get("packages")).and_then(|p| p.as_array()) {
+        let specs = match shim
+            .get("_npx")
+            .and_then(|n| n.get("packages"))
+            .and_then(|p| p.as_array())
+        {
             Some(s) => s,
             None => continue,
         };
@@ -135,7 +142,10 @@ mod tests {
 
     #[test]
     fn preserves_scoped_names() {
-        assert_eq!(npx_pkg_name("@anthropic-ai/claude-code@1.0.0"), "@anthropic-ai/claude-code");
+        assert_eq!(
+            npx_pkg_name("@anthropic-ai/claude-code@1.0.0"),
+            "@anthropic-ai/claude-code"
+        );
         assert_eq!(npx_pkg_name("@scope/pkg"), "@scope/pkg");
     }
 

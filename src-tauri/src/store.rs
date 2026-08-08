@@ -25,7 +25,15 @@ pub struct Sources {
     pub manual: bool,
 }
 impl Default for Sources {
-    fn default() -> Self { Sources { npm: true, brew: true, pip: true, npx: true, manual: true } }
+    fn default() -> Self {
+        Sources {
+            npm: true,
+            brew: true,
+            pip: true,
+            npx: true,
+            manual: true,
+        }
+    }
 }
 
 /// Persisted user settings. Missing or corrupt file reads as defaults.
@@ -47,8 +55,12 @@ impl Store {
         Store { dir }
     }
 
-    fn pins_path(&self) -> PathBuf { self.dir.join("pins.json") }
-    fn history_path(&self) -> PathBuf { self.dir.join("history.json") }
+    fn pins_path(&self) -> PathBuf {
+        self.dir.join("pins.json")
+    }
+    fn history_path(&self) -> PathBuf {
+        self.dir.join("history.json")
+    }
 
     fn read_json<T: for<'de> Deserialize<'de> + Default>(path: &Path) -> T {
         std::fs::read_to_string(path)
@@ -90,7 +102,9 @@ impl Store {
         Self::write_json(&self.history_path(), &h);
     }
 
-    fn settings_path(&self) -> PathBuf { self.dir.join("settings.json") }
+    fn settings_path(&self) -> PathBuf {
+        self.dir.join("settings.json")
+    }
 
     pub fn settings(&self) -> Settings {
         Self::read_json(&self.settings_path())
@@ -154,8 +168,22 @@ mod tests {
     fn history_appends_newest_first() {
         let s = temp_store();
         assert!(s.history().is_empty());
-        s.add_history(HistoryEntry { ts: 1, pkg: "a".into(), eco: "npm".into(), action: "install".into(), from: None, to: "1.0".into() });
-        s.add_history(HistoryEntry { ts: 2, pkg: "b".into(), eco: "npm".into(), action: "update".into(), from: Some("1.0".into()), to: "2.0".into() });
+        s.add_history(HistoryEntry {
+            ts: 1,
+            pkg: "a".into(),
+            eco: "npm".into(),
+            action: "install".into(),
+            from: None,
+            to: "1.0".into(),
+        });
+        s.add_history(HistoryEntry {
+            ts: 2,
+            pkg: "b".into(),
+            eco: "npm".into(),
+            action: "update".into(),
+            from: Some("1.0".into()),
+            to: "2.0".into(),
+        });
         let h = s.history();
         assert_eq!(h.len(), 2);
         assert_eq!(h[0].pkg, "b"); // newest first
@@ -170,7 +198,9 @@ mod tests {
         assert!(s.pins().is_empty()); // corrupt -> empty, no panic
     }
 
-    fn s_dir(s: &Store) -> PathBuf { s.dir_for_test() }
+    fn s_dir(s: &Store) -> PathBuf {
+        s.dir_for_test()
+    }
 
     #[test]
     fn settings_round_trip() {
@@ -178,8 +208,16 @@ mod tests {
         let def = s.settings();
         assert_eq!(def.github_token, "");
         assert!(def.sources.npm && def.sources.brew && def.sources.pip && def.sources.npx);
-        s.set_settings(&Settings { github_token: "abc".into(),
-            sources: Sources { npm: true, brew: false, pip: true, npx: true, manual: true } });
+        s.set_settings(&Settings {
+            github_token: "abc".into(),
+            sources: Sources {
+                npm: true,
+                brew: false,
+                pip: true,
+                npx: true,
+                manual: true,
+            },
+        });
         let got = s.settings();
         assert_eq!(got.github_token, "abc");
         assert!(!got.sources.brew);
@@ -202,7 +240,11 @@ mod tests {
         // never drop the unspecified sources to false.
         let s = temp_store();
         std::fs::create_dir_all(&s.dir_for_test()).unwrap();
-        std::fs::write(s.dir_for_test().join("settings.json"), br#"{"sources":{"npm":false}}"#).unwrap();
+        std::fs::write(
+            s.dir_for_test().join("settings.json"),
+            br#"{"sources":{"npm":false}}"#,
+        )
+        .unwrap();
         let got = s.settings();
         assert!(!got.sources.npm);
         assert!(got.sources.brew && got.sources.pip && got.sources.npx && got.sources.manual);
@@ -223,7 +265,10 @@ mod tests {
 
         migrate_legacy(&current, &legacy.dir_for_test());
 
-        assert_eq!(std::fs::read(current.join("history.json")).unwrap(), b"[{\"old\":1}]");
+        assert_eq!(
+            std::fs::read(current.join("history.json")).unwrap(),
+            b"[{\"old\":1}]"
+        );
         assert!(current.join("pins.json").exists());
         assert!(!current.join("wire.json").exists()); // caches not migrated
     }
@@ -241,7 +286,10 @@ mod tests {
 
         migrate_legacy(&current, &legacy.dir_for_test());
 
-        assert_eq!(std::fs::read(current.join("history.json")).unwrap(), b"CURRENT");
+        assert_eq!(
+            std::fs::read(current.join("history.json")).unwrap(),
+            b"CURRENT"
+        );
     }
 
     #[test]

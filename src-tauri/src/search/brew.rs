@@ -1,9 +1,9 @@
+use super::SearchResult;
+use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::time::{Duration, SystemTime};
 use std::sync::{Arc, Mutex, OnceLock};
-use serde_json::Value;
-use super::SearchResult;
+use std::time::{Duration, SystemTime};
 
 /// A catalog formula reduced to the fields search needs, with name and
 /// description pre-lowercased so the per-query substring match does no repeated
@@ -19,15 +19,27 @@ pub struct Formula {
 
 /// Parse the brew `formula.json` catalog into the lightweight Formula form.
 pub fn parse_catalog(json: &str) -> Vec<Formula> {
-    let v: Value = match serde_json::from_str(json) { Ok(v) => v, Err(_) => return Vec::new() };
-    let arr = match v.as_array() { Some(a) => a, None => return Vec::new() };
+    let v: Value = match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    let arr = match v.as_array() {
+        Some(a) => a,
+        None => return Vec::new(),
+    };
     let mut out = Vec::with_capacity(arr.len());
     for f in arr {
         let name = f.get("name").and_then(|x| x.as_str()).unwrap_or("");
-        if name.is_empty() { continue; }
+        if name.is_empty() {
+            continue;
+        }
         let desc = f.get("desc").and_then(|x| x.as_str()).unwrap_or("").trim();
-        let version = f.get("versions").and_then(|x| x.get("stable"))
-            .and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let version = f
+            .get("versions")
+            .and_then(|x| x.get("stable"))
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string();
         out.push(Formula {
             name: name.to_string(),
             name_lc: name.to_lowercase(),
@@ -43,12 +55,17 @@ pub fn parse_catalog(json: &str) -> Vec<Formula> {
 /// comma-grouped string ("1,234,567"), so strip commas before parsing.
 pub fn parse_analytics(json: &str) -> BTreeMap<String, u64> {
     let mut map = BTreeMap::new();
-    let v: Value = match serde_json::from_str(json) { Ok(v) => v, Err(_) => return map };
+    let v: Value = match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(_) => return map,
+    };
     let formulae = match v.get("formulae").and_then(|f| f.as_object()) {
-        Some(o) => o, None => return map,
+        Some(o) => o,
+        None => return map,
     };
     for (name, arr) in formulae {
-        let count = arr.as_array()
+        let count = arr
+            .as_array()
             .and_then(|a| a.first())
             .and_then(|e| e.get("count"))
             .and_then(|c| c.as_str())
@@ -63,16 +80,26 @@ pub fn parse_analytics(json: &str) -> BTreeMap<String, u64> {
 /// Search the parsed catalog in-process. Case-insensitive substring on name or
 /// description (both already lowercased). weekly_downloads is the 30-day
 /// analytics count divided to a rough weekly figure.
-pub fn search_parsed(formulae: &[Formula], query: &str, analytics: &BTreeMap<String, u64>) -> Vec<SearchResult> {
+pub fn search_parsed(
+    formulae: &[Formula],
+    query: &str,
+    analytics: &BTreeMap<String, u64>,
+) -> Vec<SearchResult> {
     let q = query.to_lowercase();
     let mut out = Vec::new();
     for f in formulae {
-        if !f.name_lc.contains(&q) && !f.desc_lc.contains(&q) { continue; }
+        if !f.name_lc.contains(&q) && !f.desc_lc.contains(&q) {
+            continue;
+        }
         let weekly = analytics.get(&f.name).copied().unwrap_or(0) / 4;
         out.push(SearchResult {
-            name: f.name.clone(), eco: "brew".into(), pkg: f.name.clone(),
-            version: f.version.clone(), weekly_downloads: weekly,
-            size: String::new(), description: f.desc.clone(),
+            name: f.name.clone(),
+            eco: "brew".into(),
+            pkg: f.name.clone(),
+            version: f.version.clone(),
+            weekly_downloads: weekly,
+            size: String::new(),
+            description: f.desc.clone(),
         });
     }
     out
@@ -225,10 +252,12 @@ mod tests {
 
     #[test]
     fn substring_match_on_name_or_desc_with_weekly_from_analytics() {
-        let formulae = parse_catalog(r#"[
+        let formulae = parse_catalog(
+            r#"[
             {"name":"ripgrep","desc":"Recursive search faster than grep","versions":{"stable":"14.1.1"}},
             {"name":"jq","desc":"JSON processor","versions":{"stable":"1.7.1"}}
-        ]"#);
+        ]"#,
+        );
         let mut a = BTreeMap::new();
         a.insert("ripgrep".to_string(), 4_000_000u64);
         let hits = search_parsed(&formulae, "search", &a);
@@ -237,7 +266,7 @@ mod tests {
         assert_eq!(hits[0].eco, "brew");
         assert_eq!(hits[0].version, "14.1.1");
         assert_eq!(hits[0].weekly_downloads, 1_000_000); // 4M / 4
-        // matches description too:
+                                                         // matches description too:
         assert_eq!(search_parsed(&formulae, "json", &a).len(), 1);
     }
 }

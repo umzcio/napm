@@ -7,7 +7,9 @@ use std::path::Path;
 /// not parse. Seconds precision; ignores any fractional/zone suffix.
 pub fn iso_to_unix(s: &str) -> Option<i64> {
     let b = s.as_bytes();
-    if b.len() < 10 { return None; }
+    if b.len() < 10 {
+        return None;
+    }
     let num = |a: usize, z: usize| s.get(a..z)?.parse::<i64>().ok();
     let year = num(0, 4)?;
     let month = num(5, 7)?;
@@ -41,26 +43,39 @@ pub fn parse_npm_time(json: &str, version: &str) -> Option<i64> {
 pub fn parse_pypi_time(json: &str, version: &str) -> Option<i64> {
     let v: Value = serde_json::from_str(json).ok()?;
     let files = v.get("releases")?.get(version)?.as_array()?;
-    let t = files.first()?.get("upload_time_iso_8601")
-        .or_else(|| files.first()?.get("upload_time"))?.as_str()?;
+    let t = files
+        .first()?
+        .get("upload_time_iso_8601")
+        .or_else(|| files.first()?.get("upload_time"))?
+        .as_str()?;
     iso_to_unix(t)
 }
 
 /// (recommendation, age_label) from a publish time and "now". Settled (>= 7 days)
 /// is "safe"; fresher is "new". A None publish time is "unknown".
 pub fn age_verdict(published: Option<i64>, now: i64) -> (String, String) {
-    let p = match published { Some(p) => p, None => return ("unknown".into(), "".into()) };
+    let p = match published {
+        Some(p) => p,
+        None => return ("unknown".into(), "".into()),
+    };
     let days = ((now - p).max(0)) / 86400;
-    let label = if days < 1 { "released today".to_string() }
-        else if days == 1 { "released 1 day ago".to_string() }
-        else { format!("released {} days ago", days) };
+    let label = if days < 1 {
+        "released today".to_string()
+    } else if days == 1 {
+        "released 1 day ago".to_string()
+    } else {
+        format!("released {} days ago", days)
+    };
     let rec = if days > 7 { "safe" } else { "new" };
     (rec.to_string(), label)
 }
 
 /// GitHub Search API response -> `total_count`.
 pub fn parse_search_total_count(json: &str) -> Option<u64> {
-    serde_json::from_str::<Value>(json).ok()?.get("total_count")?.as_u64()
+    serde_json::from_str::<Value>(json)
+        .ok()?
+        .get("total_count")?
+        .as_u64()
 }
 
 /// Unix seconds (UTC) -> "YYYY-MM-DD" (inverse of the civil-day math in
@@ -113,7 +128,9 @@ pub fn github_repo_from_url(url: &str) -> Option<(String, String)> {
     let repo = parts.next()?.trim().trim_end_matches(".git");
     // strip any trailing query/fragment/path on the repo segment
     let repo = repo.split(['#', '?']).next().unwrap_or(repo);
-    if owner.is_empty() || repo.is_empty() { return None; }
+    if owner.is_empty() || repo.is_empty() {
+        return None;
+    }
     Some((owner.to_string(), repo.to_string()))
 }
 
@@ -121,16 +138,27 @@ pub fn github_repo_from_url(url: &str) -> Option<(String, String)> {
 /// tag matches `version` (with or without a leading "v"). Returns up to 12
 /// non-empty, de-marked lines from that release body.
 pub fn parse_github_releases(json: &str, version: &str) -> Vec<String> {
-    let v: Value = match serde_json::from_str(json) { Ok(v) => v, Err(_) => return Vec::new() };
-    let arr = match v.as_array() { Some(a) => a, None => return Vec::new() };
+    let v: Value = match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    let arr = match v.as_array() {
+        Some(a) => a,
+        None => return Vec::new(),
+    };
     let want = version.trim_start_matches('v');
     let body = arr.iter().find_map(|rel| {
         let tag = rel.get("tag_name").and_then(|t| t.as_str()).unwrap_or("");
         if tag.trim_start_matches('v') == want {
             rel.get("body").and_then(|b| b.as_str())
-        } else { None }
+        } else {
+            None
+        }
     });
-    let body = match body { Some(b) => b, None => return Vec::new() };
+    let body = match body {
+        Some(b) => b,
+        None => return Vec::new(),
+    };
     body.lines()
         .map(|l| l.trim().trim_start_matches(['#', '-', '*', ' ']).trim())
         .filter(|l| !l.is_empty())
@@ -155,7 +183,10 @@ fn repo_url_from_doc(eco: &str, body: &str) -> Option<String> {
                     }
                 }
             }
-            info.get("home_page").and_then(|h| h.as_str()).filter(|s| s.contains("github.com")).map(String::from)
+            info.get("home_page")
+                .and_then(|h| h.as_str())
+                .filter(|s| s.contains("github.com"))
+                .map(String::from)
         }
         _ => None,
     }
@@ -165,7 +196,13 @@ fn repo_url_from_doc(eco: &str, body: &str) -> Option<String> {
 /// fetch the registry doc once, derive the publish time, and - only when the
 /// release is fresh ("new") - run a token-gated GitHub issue-velocity check that
 /// can upgrade the verdict to "hold". brew has no per-version date: ("unknown","","").
-pub fn release_verdict(eco: &str, pkg: &str, version: &str, now: i64, cache_dir: &Path) -> (String, String, String) {
+pub fn release_verdict(
+    eco: &str,
+    pkg: &str,
+    version: &str,
+    now: i64,
+    cache_dir: &Path,
+) -> (String, String, String) {
     let (doc_url, published) = match eco {
         "npm" | "npx" => {
             let url = format!("https://registry.npmjs.org/{}", crate::http::encode(pkg));
@@ -227,37 +264,64 @@ fn velocity_verdict(
     if let Ok(s) = std::fs::read_to_string(&cache_file) {
         if let Ok(c) = serde_json::from_str::<HoldCache>(&s) {
             if now - c.checked_ts < 12 * 3600 {
-                return if c.recommendation == "hold" { Some((c.recommendation, c.reason)) } else { None };
+                return if c.recommendation == "hold" {
+                    Some((c.recommendation, c.reason))
+                } else {
+                    None
+                };
             }
         }
     }
 
     let token = super::github_token(cache_dir)?; // no token -> stay "new"
     let auth = format!("Bearer {}", token);
-    let headers: Vec<(&str, &str)> = vec![("Accept", "application/vnd.github+json"), ("Authorization", &auth)];
+    let headers: Vec<(&str, &str)> = vec![
+        ("Accept", "application/vnd.github+json"),
+        ("Authorization", &auth),
+    ];
 
     let release_ymd = unix_to_ymd(published);
     let start_ymd = unix_to_ymd(published - 90 * 86400);
     let count = |q: String| -> Option<u64> {
-        let url = format!("https://api.github.com/search/issues?q={}&per_page=1", crate::http::encode(&q));
+        let url = format!(
+            "https://api.github.com/search/issues?q={}&per_page=1",
+            crate::http::encode(&q)
+        );
         let body = crate::http::get_with_headers(&url, &headers).ok()?;
         parse_search_total_count(&body)
     };
-    let recent = count(format!("repo:{}/{} type:issue created:>={}", owner, repo, release_ymd))?;
-    let baseline = count(format!("repo:{}/{} type:issue created:{}..{}", owner, repo, start_ymd, release_ymd))?;
+    let recent = count(format!(
+        "repo:{}/{} type:issue created:>={}",
+        owner, repo, release_ymd
+    ))?;
+    let baseline = count(format!(
+        "repo:{}/{} type:issue created:{}..{}",
+        owner, repo, start_ymd, release_ymd
+    ))?;
     let days_since = ((now - published).max(0)) / 86400;
 
     let (rec, reason) = match velocity_hold(recent, baseline, days_since) {
         Some(mult) => (
             "hold".to_string(),
-            format!("issues opening about {}x faster than usual since release", mult),
+            format!(
+                "issues opening about {}x faster than usual since release",
+                mult
+            ),
         ),
         None => ("new".to_string(), String::new()),
     };
-    if let Ok(s) = serde_json::to_string(&HoldCache { checked_ts: now, recommendation: rec.clone(), reason: reason.clone() }) {
+    if let Ok(s) = serde_json::to_string(&HoldCache {
+        checked_ts: now,
+        recommendation: rec.clone(),
+        reason: reason.clone(),
+    }) {
         let _ = std::fs::write(&cache_file, s);
     }
-    if rec == "hold" { Some((rec, reason)) } else { None }
+    if rec == "hold" {
+        Some((rec, reason))
+    } else {
+        None
+    }
 }
 
 /// Fetch and cache the GitHub changelog for (eco, pkg, version).
@@ -269,7 +333,10 @@ pub fn changelog(eco: &str, pkg: &str, version: &str, cache_dir: &Path) -> Vec<S
     let safe_eco = eco.replace(['/', '\\'], "_").replace("..", "_");
     let safe_pkg = pkg.replace(['/', '@', '\\'], "_").replace("..", "_");
     let safe_ver = version.replace(['/', '\\'], "_").replace("..", "_");
-    let cache_file = cache_dir.join(format!("changelog_{}_{}_{}.json", safe_eco, safe_pkg, safe_ver));
+    let cache_file = cache_dir.join(format!(
+        "changelog_{}_{}_{}.json",
+        safe_eco, safe_pkg, safe_ver
+    ));
 
     // Return cached result if it exists (permanent cache per version).
     if let Ok(s) = std::fs::read_to_string(&cache_file) {
@@ -303,16 +370,21 @@ pub fn changelog(eco: &str, pkg: &str, version: &str, cache_dir: &Path) -> Vec<S
                     }
                 }
                 // Fall back to home_page.
-                info.get("home_page").and_then(|h| h.as_str())
+                info.get("home_page")
+                    .and_then(|h| h.as_str())
                     .filter(|s| s.contains("github.com"))
                     .map(String::from)
             })
         }
         "brew" => {
-            let url = format!("https://formulae.brew.sh/api/formula/{}.json", crate::http::encode(pkg));
+            let url = format!(
+                "https://formulae.brew.sh/api/formula/{}.json",
+                crate::http::encode(pkg)
+            );
             crate::http::get(&url).ok().and_then(|body| {
                 let v: Value = serde_json::from_str(&body).ok()?;
-                v.get("homepage")?.as_str()
+                v.get("homepage")?
+                    .as_str()
                     .filter(|s| s.contains("github.com"))
                     .map(String::from)
             })
@@ -340,7 +412,9 @@ pub fn changelog(eco: &str, pkg: &str, version: &str, cache_dir: &Path) -> Vec<S
         // Propagate HTTP errors as None so the outer closure returns None -> Err(()).
         let body = crate::http::get_with_headers(&releases_url, &headers).ok()?;
         Some(parse_github_releases(&body, version))
-    })().map(Ok).unwrap_or(Err(()));
+    })()
+    .map(Ok)
+    .unwrap_or(Err(()));
 
     match fetch_result {
         Ok(result) => {
@@ -395,7 +469,10 @@ mod tests {
 
     #[test]
     fn parses_search_total_and_formats_date() {
-        assert_eq!(parse_search_total_count(r#"{"total_count":42,"items":[]}"#), Some(42));
+        assert_eq!(
+            parse_search_total_count(r#"{"total_count":42,"items":[]}"#),
+            Some(42)
+        );
         assert_eq!(parse_search_total_count("not json"), None);
         assert_eq!(unix_to_ymd(1714564800), "2024-05-01");
         assert_eq!(unix_to_ymd(0), "1970-01-01");
@@ -419,10 +496,14 @@ mod tests {
 
     #[test]
     fn repo_url_and_release_notes() {
-        assert_eq!(github_repo_from_url("git+https://github.com/eslint/eslint.git"),
-                   Some(("eslint".to_string(), "eslint".to_string())));
-        assert_eq!(github_repo_from_url("https://github.com/cli/cli/tree/trunk"),
-                   Some(("cli".to_string(), "cli".to_string())));
+        assert_eq!(
+            github_repo_from_url("git+https://github.com/eslint/eslint.git"),
+            Some(("eslint".to_string(), "eslint".to_string()))
+        );
+        assert_eq!(
+            github_repo_from_url("https://github.com/cli/cli/tree/trunk"),
+            Some(("cli".to_string(), "cli".to_string()))
+        );
         assert_eq!(github_repo_from_url("https://example.com/x"), None);
 
         let rel = "[
@@ -430,6 +511,13 @@ mod tests {
           {\"tag_name\":\"v1.2.2\",\"body\":\"old\"}
         ]";
         let log = parse_github_releases(rel, "1.2.3");
-        assert_eq!(log, vec!["Notes".to_string(), "Fixed a bug".to_string(), "Added a flag".to_string()]);
+        assert_eq!(
+            log,
+            vec![
+                "Notes".to_string(),
+                "Fixed a bug".to_string(),
+                "Added a flag".to_string()
+            ]
+        );
     }
 }
