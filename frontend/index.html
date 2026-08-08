@@ -727,6 +727,14 @@
 
   // ---- TRANSFERS ---------------------------------------------------------
   var xfers=[], history=[];
+  // ---- IMPORT --------------------------------------------------------------
+  // IMPORT_STATE holds the loaded preview (null until "Preview" succeeds).
+  // IMPORT_WAITERS maps an in-flight import op's opId to a one-shot callback,
+  // so the SAME permanent transfer-done listener below (registered once, at
+  // startup, well before any import op can run) can resolve each step of the
+  // sequential import queue without a second listener and its attendant
+  // listen-before-start race.
+  var IMPORT_STATE=null, IMPORT_WAITERS={};
   // Set true when get_history rejects, so an empty history renders as
   // "could not load" rather than an indistinguishable "nothing happened yet".
   var HISTORY_FAILED=false;
@@ -798,6 +806,12 @@
     histMenu(+tr.dataset.i, e.clientX, e.clientY);
   });
   var opSeq=0;
+  // Returns the transfer row `x` it created (or synchronously resolved), so a
+  // caller that needs to know when THIS specific op finishes -- like the
+  // import queue's sequential loop -- can key off `x.opId` / `x.done`.
+  // Returns undefined when the dup-guard bails (an operation for the same
+  // (eco, pkg) is already running); every other caller already ignored the
+  // return value, so this is not a behavior change for them.
   function queueTransfer(t,target,action){
     if(!t) return;
     var dup=xfers.find(function(z){ return !z.done && z.pkg===t.pkg && z.eco===t.eco; });
@@ -817,10 +831,11 @@
     xfers=xfers.filter(function(z){ if(!z.done) return true; doneSeen++; return doneSeen<=50; });
     renderXfers();
     var iv=inv();
-    if(!iv){ x.done=true; x.ok=false; x.lines.push({stream:"stderr",line:"(not running in napm)"}); renderXfers(); return; }
+    if(!iv){ x.done=true; x.ok=false; x.lines.push({stream:"stderr",line:"(not running in napm)"}); renderXfers(); return x; }
     // run_op has its own event-driven feedback (transfer-line/transfer-done),
     // so this stays a raw fire-and-forget invoke rather than call().
     iv("run_op",{opId:opId,eco:t.eco,pkg:t.pkg,from:from,to:target,action:action});
+    return x;
   }
 
   function xferMenu(xi, x, y){
@@ -1026,6 +1041,10 @@
       var activeView=document.querySelector(".view.active");
       if(activeView && activeView.dataset.view==="whatsnew") loadWhatsNew();
       loadHistory();
+      // If the import queue is waiting on this exact op, resolve its step
+      // now instead of duplicating a second transfer-done subscription.
+      var waiter=IMPORT_WAITERS[e.payload.op_id];
+      if(waiter){ delete IMPORT_WAITERS[e.payload.op_id]; waiter(e.payload.success); }
     });
   })();
   // Show the real app version in the wordmark, like "napm v0.1.0", echoing the
@@ -1112,6 +1131,9 @@
       {label:"Open data folder", run:function(){ if(inv()) call("open_data_dir"); }},
       {label:"Export library (JSON)", run:function(){ exportLibrary("json"); }},
       {label:"Export library (Markdown)", run:function(){ exportLibrary("markdown"); }},
+      {label:"Export import manifest...", run:function(){ exportLibrary("manifest"); }},
+      {sep:true},
+      {label:"Import library...", run:function(){ showImportModal(); }},
       {sep:true},
       {label:"Quit", run:quitApp}
     ],
@@ -1202,7 +1224,15 @@
   }, true);
   document.addEventListener("keydown",function(e){ if(e.key==="Escape"){ if(popupOpen) closePopup(); else closeModal(); } });
 
-  function closeModal(){ document.getElementById("modalBack").style.display="none"; }
+  function closeModal(){
+    document.getElementById("modalBack").style.display="none";
+    // Import's preview modal widens the shared modal box via inline style
+    // (the default .modal max-width is a snug 420px); reset it here, the one
+    // choke point every modal close already goes through, so every OTHER
+    // modal doesn't have to remember to do it themselves.
+    document.getElementById("modalBox").style.maxWidth="";
+    IMPORT_STATE=null;
+  }
   function renderPrefs(s){
     s=s||{}; var src=s.sources||{npm:true,brew:true,pip:true,npx:true,cargo:true,manual:true};
     var rows=["npm","brew","pip","npx","cargo","manual"].map(function(k){
@@ -1284,6 +1314,116 @@
     }
     renderUninstallModal(t,{});
   };
+  // ---- IMPORT --------------------------------------------------------------
+  // Recreate a toolchain from a manifest exported by "Export import
+  // manifest...". Honest up front: this cannot clone a machine (manual/npx
+  // tools have no install path, brew cannot pin a version), and every row
+  // installs whatever is currently latest -- see importer.rs's module doc.
+  //
+  // Input is drag-drop of a .json file and/or pasting its text into a
+  // textarea, NOT a native file-picker dialog: the Tauri dialog plugin is not
+  // currently a dependency, and drag-drop needs no new Rust dependency or
+  // capabilities entry, so it is the cheaper v1 (per the plan's design
+  // decision). Both paths just fill the same textarea; "Preview" reads it.
+  function showImportModal(){
+    IMPORT_STATE=null;
+    renderImportModal();
+  }
+  function importBucketHtml(title, rows, showReasons){
+    if(!rows.length) return '';
+    var items=rows.map(function(r){
+      var ver = showReasons ? '' : h` <span class="muted">${r.version||r.manifestVersion}</span>`;
+      var exported = (!showReasons && r.manifestVersion && r.manifestVersion!==r.version)
+        ? h` <span class="muted" style="font-size:10px">(exported at ${r.manifestVersion})</span>` : '';
+      var reasonHtml = (showReasons && r.reason)
+        ? h`<div class="signal warn" style="margin:2px 0 4px">${r.reason}</div>` : '';
+      return h`<div style="padding:2px 0;border-bottom:1px solid var(--dgray)">`+
+        h`<span class="src ${r.eco}">${r.eco}</span> <b>${r.pkg}</b>`+raw(ver)+raw(exported)+
+        raw(reasonHtml)+'</div>';
+    }).join("");
+    return h`<div style="margin-top:10px"><b>${title}</b> <span class="muted">(${rows.length})</span>`+
+      '<div style="max-height:150px;overflow:auto;margin-top:4px">'+items+'</div></div>';
+  }
+  function renderImportModal(){
+    var box=document.getElementById("modalBox");
+    box.style.maxWidth="640px";
+    if(!IMPORT_STATE || !IMPORT_STATE.preview){
+      var errMsg = (IMPORT_STATE&&IMPORT_STATE.err) || "";
+      // Re-rendering on a failed Preview (e.g. a schema mismatch) must not
+      // wipe out what the user pasted/dropped, or every fix-and-retry cycle
+      // means re-dropping the file.
+      var savedText = (IMPORT_STATE&&IMPORT_STATE.text) || "";
+      box.innerHTML=h`<div class="m-h">Import library...<span class="x" data-close>×</span></div>`+
+        '<div class="m-b">'+
+        '<div class="muted">Recreate a toolchain from a napm import manifest. This cannot clone a machine: manual and npx tools have no install path, and Homebrew cannot pin a version -- every installable row below is installed at whatever is currently latest, not necessarily the exact version that was exported.</div>'+
+        '<div id="importDrop" style="margin-top:10px;border:1px dashed var(--ddgray);padding:14px;text-align:center;font-size:11px">Drop a napm-import-*.json manifest here, or paste it below</div>'+
+        h`<textarea id="importText" class="search" style="width:100%;height:90px;margin-top:8px;font-family:var(--mono);font-size:11px;box-sizing:border-box" placeholder="{&quot;schema&quot;:1,&quot;tools&quot;:[...]}">${savedText}</textarea>`+
+        (errMsg ? h`<div class="signal danger" style="margin-top:6px">${errMsg}</div>` : '')+
+        '<div style="margin-top:12px;text-align:right"><button class="btn" data-close>Cancel</button> <button class="btn primary" data-import-preview>Preview</button></div>'+
+        '</div>';
+    } else {
+      var p=IMPORT_STATE.preview;
+      var when = p.generatedAt ? h`<div class="muted" style="margin-top:2px">exported ${p.generatedAt}</div>` : '';
+      var noneAtAll = !p.willInstall.length && !p.alreadyPresent.length && !p.cannotInstall.length;
+      box.innerHTML=h`<div class="m-h">Import preview<span class="x" data-close>×</span></div>`+
+        '<div class="m-b">'+
+        raw(when)+
+        (noneAtAll ? '<div class="empty" style="margin-top:8px">This manifest has no tools in it.</div>' : '')+
+        raw(importBucketHtml("Will install", p.willInstall, false))+
+        raw(importBucketHtml("Already present", p.alreadyPresent, false))+
+        raw(importBucketHtml("Cannot install", p.cannotInstall, true))+
+        '<div style="margin-top:12px;text-align:right"><button class="btn" data-close>Cancel</button> '+
+        '<button class="btn primary" data-import-confirm'+(p.willInstall.length?'':' disabled')+'>Import '+p.willInstall.length+' tool'+(p.willInstall.length===1?'':'s')+'</button></div>'+
+        '</div>';
+    }
+    document.getElementById("modalBack").style.display="flex";
+  }
+  // Drives the will-install bucket ONE OP AT A TIME: start a single
+  // queueTransfer, wait for that exact op's transfer-done (via
+  // IMPORT_WAITERS, resolved by the permanent listener above), only then
+  // start the next. Concurrent ops would be the least honest version of this
+  // feature (Transfers would lie about what ran when), so this never fires
+  // more than one at once.
+  function importStep(rows, i, summary, done){
+    if(i>=rows.length){ done(summary); return; }
+    var r=rows[i];
+    var label=r.pkg+" ("+r.eco+")";
+    var idx=findToolIdx(r.pkg, r.eco);
+    var toolObj = idx>=0 ? TOOLS[idx] : {
+      name:r.pkg, eco:r.eco, pkg:r.pkg, installed:null, latest:r.version||r.manifestVersion,
+      size:"", publisher:"", description:"", updated:0, pinned:false, requested:true,
+      status:"offline", bump:"none"
+    };
+    if(idx<0) TOOLS.push(toolObj);
+    var target=r.version||r.manifestVersion;
+    var x=queueTransfer(toolObj, target, "install");
+    var next=function(ok){
+      if(ok) summary.ok++; else summary.failed.push(label);
+      importStep(rows, i+1, summary, done);
+    };
+    if(!x){
+      // The dup-guard bailed: an operation for this exact (eco, pkg) is
+      // already running from outside the import queue. Count it honestly
+      // rather than silently dropping it.
+      next(false);
+      return;
+    }
+    if(x.done){ next(x.ok); return; } // resolved synchronously (no Tauri bridge)
+    IMPORT_WAITERS[x.opId]=next;
+  }
+  function showImportSummary(preview, seqSummary){
+    var box=document.getElementById("modalBox");
+    box.style.maxWidth="480px";
+    var msg=seqSummary.ok+" installed, "+seqSummary.failed.length+" failed, "+
+      preview.cannotInstall.length+" skipped, "+preview.alreadyPresent.length+" already present";
+    var failedHtml = seqSummary.failed.length
+      ? h`<div class="signal danger" style="margin-top:8px"><span class="lbl">failed:</span> ${seqSummary.failed.join(", ")}</div>`
+      : '';
+    box.innerHTML=h`<div class="m-h">Import complete<span class="x" data-close>×</span></div>`+
+      '<div class="m-b">'+h`<div>${msg}</div>`+raw(failedHtml)+
+      '<div style="margin-top:12px;text-align:right"><button class="btn primary" data-close>OK</button></div></div>';
+    document.getElementById("modalBack").style.display="flex";
+  }
   window.showAbout=function(){
     var box=document.getElementById("modalBox");
     var ver = window.__appVer || "";
@@ -1336,8 +1476,53 @@
       if(pending){ queueTransfer(pending,"","remove"); switchTab("transfers"); }
       return;
     }
+    if(e.target.hasAttribute("data-import-preview")){
+      var ta=document.getElementById("importText");
+      var rawText=(ta&&ta.value)||"";
+      var txt=rawText.trim();
+      if(!txt){ IMPORT_STATE={err:"Paste or drop a manifest first.", text:rawText}; renderImportModal(); return; }
+      var iv2=inv();
+      if(!iv2){ IMPORT_STATE={err:"not running in napm", text:rawText}; renderImportModal(); return; }
+      call("import_preview",{manifestJson:txt}).then(function(preview){
+        IMPORT_STATE={preview:preview};
+        renderImportModal();
+      }).catch(function(err){
+        IMPORT_STATE={err:summarizeErr(err), text:rawText};
+        renderImportModal();
+      });
+      return;
+    }
+    if(e.target.hasAttribute("data-import-confirm")){
+      if(!IMPORT_STATE || !IMPORT_STATE.preview) return;
+      var preview=IMPORT_STATE.preview;
+      var rows=preview.willInstall.slice();
+      closeModal(); // also clears IMPORT_STATE; the summary modal replaces it
+      switchTab("transfers");
+      importStep(rows, 0, {ok:0, failed:[]}, function(seqSummary){
+        showImportSummary(preview, seqSummary);
+      });
+      return;
+    }
     if(e.target.id==="modalBack" || e.target.hasAttribute("data-close")) { closeModal(); return; }
     if(e.target.hasAttribute("data-repo")){ e.preventDefault(); openExt("https://github.com/umzcio/napm"); }
+  });
+  // Drag-and-drop of a manifest .json file onto the import modal's drop zone.
+  // Delegated on modalBack (rather than #importDrop directly) since that
+  // element only exists while the import modal's innerHTML is mounted.
+  document.getElementById("modalBack").addEventListener("dragover",function(e){
+    if(e.target.closest && e.target.closest("#importDrop")) e.preventDefault();
+  });
+  document.getElementById("modalBack").addEventListener("drop",function(e){
+    if(!(e.target.closest && e.target.closest("#importDrop"))) return;
+    e.preventDefault();
+    var f=e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if(!f) return;
+    var reader=new FileReader();
+    reader.onload=function(){
+      var ta=document.getElementById("importText");
+      if(ta) ta.value=String(reader.result||"");
+    };
+    reader.readAsText(f);
   });
   // (Escape handling is unified with the menu handler above, layering menu over modal.)
 
