@@ -3,6 +3,7 @@ use serde::Serialize;
 use std::process::Command;
 
 pub mod brew;
+pub mod cargo;
 pub mod manual;
 pub mod npm;
 pub mod npx;
@@ -74,67 +75,89 @@ pub fn scan_all(
     probe_manual: bool,
     cache_dir: &std::path::Path,
 ) -> Vec<InstalledTool> {
-    // Fan out the four independent scanners concurrently, mirroring
-    // search::search_all: three of them block on a package-manager network
+    // Fan out the five independent scanners concurrently, mirroring
+    // search::search_all: four of them block on a package-manager network
     // call in a subprocess (`npm outdated`, `brew outdated`, `pip list
-    // --outdated`), so running them in parallel makes total latency the
-    // slowest source rather than the sum. manual must run AFTER the join: it
-    // needs `other_names` built from the other four sources' results, so it
-    // stays sequential. A panicking source thread degrades to an empty vec,
-    // matching each scanner's own no-op-on-failure behavior.
-    let (npm_rows, brew_rows, pip_rows, npx_rows) = std::thread::scope(|s| {
-        let n = s.spawn(|| {
-            if sources.npm {
-                npm::scan_npm()
-            } else {
-                Vec::new()
-            }
+    // --outdated`, crates.io lookups for cargo), so running them in parallel
+    // makes total latency the slowest source rather than the sum. manual must
+    // run AFTER the join: it needs `other_names` built from the other five
+    // sources' results, so it stays sequential. A panicking source thread
+    // degrades to an empty vec, matching each scanner's own no-op-on-failure
+    // behavior.
+    let (npm_rows, brew_rows, pip_rows, npx_rows, (cargo_rows, cargo_bins)) =
+        std::thread::scope(|s| {
+            let n = s.spawn(|| {
+                if sources.npm {
+                    npm::scan_npm()
+                } else {
+                    Vec::new()
+                }
+            });
+            let b = s.spawn(|| {
+                if sources.brew {
+                    brew::scan_brew()
+                } else {
+                    Vec::new()
+                }
+            });
+            let p = s.spawn(|| {
+                if sources.pip {
+                    pip::scan_pip()
+                } else {
+                    Vec::new()
+                }
+            });
+            let x = s.spawn(|| {
+                if sources.npx {
+                    npx::scan_npx()
+                } else {
+                    Vec::new()
+                }
+            });
+            let c = s.spawn(|| {
+                if sources.cargo {
+                    cargo::scan_cargo_with_bins(cache_dir)
+                } else {
+                    (Vec::new(), Vec::new())
+                }
+            });
+            (
+                n.join().unwrap_or_default(),
+                b.join().unwrap_or_default(),
+                p.join().unwrap_or_default(),
+                x.join().unwrap_or_default(),
+                c.join().unwrap_or_default(),
+            )
         });
-        let b = s.spawn(|| {
-            if sources.brew {
-                brew::scan_brew()
-            } else {
-                Vec::new()
-            }
-        });
-        let p = s.spawn(|| {
-            if sources.pip {
-                pip::scan_pip()
-            } else {
-                Vec::new()
-            }
-        });
-        let x = s.spawn(|| {
-            if sources.npx {
-                npx::scan_npx()
-            } else {
-                Vec::new()
-            }
-        });
-        (
-            n.join().unwrap_or_default(),
-            b.join().unwrap_or_default(),
-            p.join().unwrap_or_default(),
-            x.join().unwrap_or_default(),
-        )
-    });
 
     let mut all = Vec::new();
     all.extend(npm_rows);
     all.extend(brew_rows);
     all.extend(pip_rows);
     all.extend(npx_rows);
+    all.extend(cargo_rows);
 
     if sources.manual {
-        let other_names: std::collections::BTreeSet<String> =
-            all.iter().map(|t| t.name.clone()).collect();
-        all.extend(manual::scan_manual(&other_names, probe_manual, cache_dir));
+        let names = other_names(&all, &cargo_bins);
+        all.extend(manual::scan_manual(&names, probe_manual, cache_dir));
     }
     for row in all.iter_mut() {
         row.pinned = pins.contains(&row.pkg);
     }
     stamp_status_and_bump(&mut all);
     all
+}
+
+/// The exclusion set the manual scanner receives: every already-scanned row's
+/// display name, plus `extra` -- names a source contributes beyond its own
+/// rows. Only cargo does this today: a multi-binary crate is one row (its
+/// crate name), but every binary it installs (e.g. `cargo-edit`'s
+/// `cargo-add`/`cargo-rm`/...) must also be excluded from the manual $PATH
+/// sweep, not just the crate's own name (see `cargo::scan_cargo_with_bins`).
+fn other_names(rows: &[InstalledTool], extra: &[String]) -> std::collections::BTreeSet<String> {
+    let mut set: std::collections::BTreeSet<String> = rows.iter().map(|t| t.name.clone()).collect();
+    set.extend(extra.iter().cloned());
+    set
 }
 
 /// Derive and set `status`/`bump` on every row from its own `eco`/`installed`/
@@ -161,12 +184,46 @@ mod tests {
             brew: false,
             pip: false,
             npx: false,
+            cargo: false,
             manual: false,
         };
         assert_eq!(
             scan_all(&pins, sources, true, std::path::Path::new("/tmp")),
             Vec::new()
         );
+    }
+
+    #[test]
+    fn other_names_folds_in_extra_names_beyond_rows() {
+        // Mirrors a multi-binary crate (e.g. cargo-edit): one row named
+        // "cargo-edit", but its OTHER binaries (cargo-add, cargo-rm, ...) must
+        // also land in the manual scanner's exclusion set, or they leak in as
+        // fake "manual" tools (the M9 regression class this guards against).
+        let rows = vec![InstalledTool {
+            name: "cargo-edit".to_string(),
+            eco: "cargo".to_string(),
+            pkg: "cargo-edit".to_string(),
+            installed: Some("0.12.2".to_string()),
+            latest: "0.12.2".to_string(),
+            size: String::new(),
+            pinned: false,
+            publisher: String::new(),
+            description: String::new(),
+            updated: 0,
+            requested: true,
+            status: String::new(),
+            bump: String::new(),
+        }];
+        let extra = vec![
+            "cargo-add".to_string(),
+            "cargo-rm".to_string(),
+            "cargo-set-version".to_string(),
+        ];
+        let names = other_names(&rows, &extra);
+        assert!(names.contains("cargo-edit"));
+        assert!(names.contains("cargo-add"));
+        assert!(names.contains("cargo-rm"));
+        assert!(names.contains("cargo-set-version"));
     }
 
     #[test]
