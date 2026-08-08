@@ -28,7 +28,9 @@ pub fn dedup_npx(rows: Vec<InstalledTool>) -> Vec<InstalledTool> {
     for row in rows {
         map.entry(row.pkg.clone())
             .and_modify(|e| {
-                if row.installed > e.installed {
+                if super::version::cmp_opt(row.installed.as_deref(), e.installed.as_deref())
+                    == std::cmp::Ordering::Greater
+                {
                     *e = row.clone();
                 }
             })
@@ -174,5 +176,19 @@ mod tests {
         assert_eq!(tool.eco, "npx");
         assert_eq!(tool.installed.as_deref(), Some("1.2.0"));
         assert_eq!(tool.publisher, "bob"); // the chosen version's row
+    }
+
+    #[test]
+    fn dedup_uses_numeric_not_lexicographic_compare() {
+        // Lexicographic string compare would wrongly pick "1.9.0" here since
+        // "1.9.0" > "1.10.0" as strings. Numeric compare must pick 1.10.0.
+        let rows = dedup_npx(vec![
+            npx_row("tool", "1.9.0", "alice"),
+            npx_row("tool", "1.10.0", "bob"),
+        ]);
+        assert_eq!(rows.len(), 1);
+        let tool = &rows[0];
+        assert_eq!(tool.installed.as_deref(), Some("1.10.0"));
+        assert_eq!(tool.publisher, "bob"); // the newer row's metadata wins
     }
 }
