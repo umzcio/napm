@@ -1220,6 +1220,13 @@
       '<div style="margin-top:12px;text-align:right"><button class="btn" data-close>OK</button></div></div>';
     document.getElementById("modalBack").style.display="flex";
   }
+  function showUpdateCheckFailed(){
+    var box=document.getElementById("modalBox");
+    box.innerHTML='<div class="m-h">Check for updates<span class="x" data-close>×</span></div>'+
+      '<div class="m-b"><div>Could not check for updates. This does not mean you are up to date. Check your connection and try again.</div>'+
+      '<div style="margin-top:12px;text-align:right"><button class="btn" data-close>OK</button></div></div>';
+    document.getElementById("modalBack").style.display="flex";
+  }
   function checkForUpdate(manual){
     var i=inv(); if(!i || UPDATE_CHECKING) return;
     UPDATE_CHECKING=true;
@@ -1227,7 +1234,7 @@
       UPDATE_CHECKING=false;
       if(u) showUpdateModal(u);
       else if(manual) showUpToDate();
-    }).catch(function(){ UPDATE_CHECKING=false; if(manual) showUpToDate(); });
+    }).catch(function(){ UPDATE_CHECKING=false; if(manual) showUpdateCheckFailed(); });
   }
 
   function setAppVersion(){
