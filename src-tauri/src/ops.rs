@@ -1,6 +1,47 @@
+/// Package-name gate before argv. Rejects: empty, leading '-', any whitespace
+/// or control char, and shapes outside the ecosystem's grammar (npm allows one
+/// leading @scope/ segment; brew allows '@' for versioned formulae). Length <= 214.
+fn valid_pkg(eco: &str, pkg: &str) -> bool {
+    if pkg.is_empty() || pkg.len() > 214 {
+        return false;
+    }
+    if pkg.starts_with('-') {
+        return false;
+    }
+    if pkg.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return false;
+    }
+    if pkg.contains("..") {
+        return false;
+    }
+    match eco {
+        // npm/npx (npx promote installs via npm): at most one leading
+        // @scope/ segment; otherwise no '/' at all.
+        "npm" | "npx" => match pkg.strip_prefix('@') {
+            Some(rest) => {
+                rest.matches('/').count() == 1 && !rest.starts_with('/') && !rest.ends_with('/')
+            }
+            None => !pkg.contains('/'),
+        },
+        // pip and brew (and anything else): no path segments. '@' is left
+        // unrestricted so brew formulae like "gcc@13" still validate.
+        _ => !pkg.contains('/'),
+    }
+}
+
+/// Version gate: non-empty, no leading '-', chars limited to [A-Za-z0-9._+-].
+fn valid_version(v: &str) -> bool {
+    if v.is_empty() || v.starts_with('-') {
+        return false;
+    }
+    v.chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '-'))
+}
+
 /// Build the (program, args) for an operation. `pip_bin` is the resolved pip
 /// binary (e.g. "pip3"). Returns None for unsupported combinations, notably
-/// brew rollback (Homebrew keeps no old bottles).
+/// brew rollback (Homebrew keeps no old bottles), or when `pkg`/`version`
+/// fail the argument-injection gate (see valid_pkg/valid_version).
 pub fn build_command(
     eco: &str,
     pkg: &str,
@@ -8,20 +49,31 @@ pub fn build_command(
     action: &str,
     pip_bin: &str,
 ) -> Option<(String, Vec<String>)> {
+    if !valid_pkg(eco, pkg) || !valid_version(version) {
+        return None;
+    }
     match (eco, action) {
         ("npm", _) => Some((
             "npm".to_string(),
             vec![
                 "i".to_string(),
                 "-g".to_string(),
+                "--".to_string(),
                 format!("{}@{}", pkg, version),
             ],
         )),
         ("pip", _) => Some((
             pip_bin.to_string(),
-            vec!["install".to_string(), format!("{}=={}", pkg, version)],
+            vec![
+                "install".to_string(),
+                "--".to_string(),
+                format!("{}=={}", pkg, version),
+            ],
         )),
         // brew install/update only; no version pinning and no rollback.
+        // Homebrew does not reliably support a "--" end-of-options marker
+        // before formula names, so this arm relies solely on the valid_pkg
+        // gate above (leading '-' and '/' are already rejected there).
         ("brew", "install") | ("brew", "update") => Some((
             "brew".to_string(),
             vec!["install".to_string(), pkg.to_string()],
@@ -29,7 +81,12 @@ pub fn build_command(
         // npx Promote to global: install the package globally via npm.
         ("npx", "promote") => Some((
             "npm".to_string(),
-            vec!["i".to_string(), "-g".to_string(), pkg.to_string()],
+            vec![
+                "i".to_string(),
+                "-g".to_string(),
+                "--".to_string(),
+                pkg.to_string(),
+            ],
         )),
         _ => None,
     }
@@ -253,14 +310,21 @@ mod tests {
     fn npm_install_pins_version() {
         let (prog, args) = build_command("npm", "typescript", "5.6.2", "update", "pip3").unwrap();
         assert_eq!(prog, "npm");
-        assert_eq!(args, vec!["i", "-g", "typescript@5.6.2"]);
+        assert_eq!(args, vec!["i", "-g", "--", "typescript@5.6.2"]);
+    }
+
+    #[test]
+    fn npm_install_supports_scoped_package_name() {
+        let (prog, args) = build_command("npm", "@vue/cli", "5.0.8", "update", "pip3").unwrap();
+        assert_eq!(prog, "npm");
+        assert_eq!(args, vec!["i", "-g", "--", "@vue/cli@5.0.8"]);
     }
 
     #[test]
     fn pip_uses_double_equals_and_given_binary() {
         let (prog, args) = build_command("pip", "httpie", "3.2.2", "rollback", "pip3").unwrap();
         assert_eq!(prog, "pip3");
-        assert_eq!(args, vec!["install", "httpie==3.2.2"]);
+        assert_eq!(args, vec!["install", "--", "httpie==3.2.2"]);
     }
 
     #[test]
@@ -271,15 +335,68 @@ mod tests {
     }
 
     #[test]
+    fn brew_formula_name_may_contain_at_version_suffix() {
+        let (prog, args) = build_command("brew", "gcc@13", "13.2.0", "update", "pip3").unwrap();
+        assert_eq!(prog, "brew");
+        assert_eq!(args, vec!["install", "gcc@13"]);
+    }
+
+    #[test]
     fn npx_promote_installs_globally_via_npm() {
         let (prog, args) = build_command("npx", "create-vite", "5.0.0", "promote", "pip3").unwrap();
         assert_eq!(prog, "npm");
-        assert_eq!(args, vec!["i", "-g", "create-vite"]);
+        assert_eq!(args, vec!["i", "-g", "--", "create-vite"]);
     }
 
     #[test]
     fn brew_rollback_is_unsupported() {
         assert!(build_command("brew", "ripgrep", "14.0.0", "rollback", "pip3").is_none());
+    }
+
+    #[test]
+    fn rejects_leading_dash_package_name() {
+        assert!(build_command("npm", "-rf", "1.0.0", "update", "pip3").is_none());
+    }
+
+    #[test]
+    fn rejects_package_name_with_a_space() {
+        assert!(build_command("npm", "evil pkg", "1.0.0", "update", "pip3").is_none());
+    }
+
+    #[test]
+    fn rejects_package_name_with_a_newline() {
+        assert!(build_command("npm", "evil\npkg", "1.0.0", "update", "pip3").is_none());
+    }
+
+    #[test]
+    fn rejects_dotdot_in_package_name() {
+        assert!(build_command("npm", "..", "1.0.0", "update", "pip3").is_none());
+    }
+
+    #[test]
+    fn rejects_multi_segment_scoped_name() {
+        assert!(build_command("npm", "@scope/sub/pkg", "1.0.0", "update", "pip3").is_none());
+    }
+
+    #[test]
+    fn rejects_slash_in_pip_or_brew_package_name() {
+        assert!(build_command("pip", "evil/pkg", "1.0.0", "update", "pip3").is_none());
+        assert!(build_command("brew", "evil/pkg", "1.0.0", "update", "pip3").is_none());
+    }
+
+    #[test]
+    fn rejects_empty_version() {
+        assert!(build_command("npm", "typescript", "", "update", "pip3").is_none());
+    }
+
+    #[test]
+    fn rejects_version_with_a_space() {
+        assert!(build_command("npm", "typescript", "1.0 0", "update", "pip3").is_none());
+    }
+
+    #[test]
+    fn rejects_leading_dash_version() {
+        assert!(build_command("npm", "typescript", "-1.0.0", "update", "pip3").is_none());
     }
 
     // IN_FLIGHT is process-global state shared across these tests, and tests
