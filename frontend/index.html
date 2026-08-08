@@ -346,7 +346,10 @@
   // Tagged template: every ${} interpolation is HTML-escaped. Interpolate
   // pre-built trusted HTML by wrapping it in raw(): h`<td>${raw(btnHtml)}</td>`.
   // (ES6 tagged templates; fine in the shipped WKWebView.)
-  function raw(s){ return {__raw:String(s)}; }
+  // Marks pre-built trusted HTML. `h` unwraps __raw when interpolated; toString
+  // keeps it correct if the value is ever used in plain string concatenation
+  // instead (which otherwise yields "[object Object]").
+  function raw(s){ var v=String(s); return {__raw:v, toString:function(){ return v; }}; }
   function h(strings){ var out=strings[0]; for(var i=1;i<arguments.length;i++){ var v=arguments[i]; out+=(v&&v.__raw!==undefined)?v.__raw:esc(v==null?"":v); out+=strings[i]; } return out; }
   function ago(ts){ if(!ts) return "—"; var d=Math.floor((Date.now()/1000-ts)/86400);
     if(d<0) d=0; if(d<1) return "today"; if(d<7) return d+"d"; if(d<30) return Math.floor(d/7)+"w";
@@ -1287,7 +1290,7 @@
       h`<div><span class="src ${t.eco}">${t.eco}</span> <b>${t.name}</b> ${t.installed||""}</div>`+
       '<div class="muted" style="margin-top:6px">This runs:</div>'+
       h`<div><code>${cmd}</code></div>`+
-      raw(pinLine)+raw(depsLine)+raw(reasonLine)+checkingLine+
+      pinLine+depsLine+reasonLine+checkingLine+
       '<div style="margin-top:12px;text-align:right"><button class="btn" data-close>Cancel</button> '+uninstallBtn+'</div>'+
       '</div>';
     document.getElementById("modalBack").style.display="flex";
