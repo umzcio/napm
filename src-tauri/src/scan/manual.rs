@@ -54,11 +54,8 @@ fn managed_roots() -> Vec<PathBuf> {
         PathBuf::from("/usr/local/texlive"),
     ];
     // Resolved Homebrew prefix, if brew is installed (covers non-standard prefixes).
-    if let Ok(out) = Command::new("brew").arg("--prefix").output() {
-        let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !p.is_empty() {
-            roots.push(PathBuf::from(p));
-        }
+    if let Some(prefix) = super::brew::brew_prefix() {
+        roots.push(prefix.clone());
     }
     // Home-relative toolchain / version-manager dirs and the npx cache.
     if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
@@ -72,21 +69,17 @@ fn managed_roots() -> Vec<PathBuf> {
     // npm global modules: a global CLI on PATH resolves into
     // <prefix>/lib/node_modules, which `npm root -g` reports. Without this, npm
     // and npx globals leak in as "manual" wherever the prefix is not a brew root.
-    if let Ok(out) = Command::new("npm").arg("root").arg("-g").output() {
-        let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !p.is_empty() {
-            roots.push(PathBuf::from(p));
-        }
+    if let Some(root) = super::npm::npm_root() {
+        roots.push(root.clone());
     }
     // pip user console-script dir (e.g. ~/Library/Python/3.x/bin/<script>), the
     // macOS `pip3 install` default. The pip row name is the distribution name,
     // not the script basename, so only a path root catches these. The GLOBAL
     // scripts dir is intentionally NOT excluded: on macOS it is /usr/local/bin,
     // far too broad (a common curl|bash drop target for real manual tools).
-    let user_base = super::run("python3", &["-c", "import site; print(site.getuserbase())"]);
-    let ub = user_base.trim();
-    if !ub.is_empty() {
-        roots.push(PathBuf::from(ub).join("bin"));
+    let (_, user_base) = super::pip::python_site();
+    if let Some(ub) = user_base {
+        roots.push(ub.join("bin"));
     }
     roots
 }

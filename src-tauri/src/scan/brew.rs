@@ -2,6 +2,27 @@ use super::InstalledTool;
 use serde_json::Value;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::sync::OnceLock;
+
+/// The resolved Homebrew prefix (e.g. `/opt/homebrew`), from `brew --prefix`.
+/// Memoized per-process and shared with scan/manual.rs, so this only spawns
+/// once per napm run rather than once per scan. The value is per-process: a
+/// user who installs or moves Homebrew while napm is running only sees the
+/// new prefix after an app restart (PATH is already captured once at startup
+/// for the same reason).
+pub(crate) fn brew_prefix() -> &'static Option<PathBuf> {
+    static P: OnceLock<Option<PathBuf>> = OnceLock::new();
+    P.get_or_init(|| {
+        let out = super::run("brew", &["--prefix"]);
+        let p = out.trim();
+        if p.is_empty() {
+            None
+        } else {
+            Some(PathBuf::from(p))
+        }
+    })
+}
 
 /// Merge `brew list --versions` (installed) with `brew outdated --json=v2`
 /// (latest). Mirrors reference/scanner.js scanBrew().
@@ -110,19 +131,15 @@ pub fn scan_brew() -> Vec<InstalledTool> {
     let mut rows = parse_brew(&list, &outdated);
 
     let meta = parse_brew_info(&super::run("brew", &["info", "--json=v2", "--installed"]));
-    let prefix = super::run("brew", &["--prefix"]);
-    let prefix = prefix.trim();
+    let prefix = brew_prefix();
     for row in rows.iter_mut() {
         if let Some((publisher, desc)) = meta.get(&row.pkg) {
             row.publisher = publisher.clone();
             row.description = desc.clone();
         }
-        if !prefix.is_empty() {
+        if let Some(prefix) = prefix {
             if let Some(ver) = &row.installed {
-                let keg = std::path::Path::new(prefix)
-                    .join("Cellar")
-                    .join(&row.pkg)
-                    .join(ver);
+                let keg = prefix.join("Cellar").join(&row.pkg).join(ver);
                 let (updated, requested) = brew_receipt(&keg);
                 row.size = super::size::human_size(super::size::dir_size(&keg));
                 row.updated = updated;
