@@ -1,6 +1,12 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+/// Process-wide lock guarding read-modify-write sequences on pins/history/settings.
+/// `Store` is constructed fresh per command call, so this must be a `static`
+/// rather than a per-instance lock to actually serialize concurrent callers.
+static STORE_LOCK: Mutex<()> = Mutex::new(());
 
 /// One logged version change. Mirrors the prototype's HistoryEntry, plus `eco`
 /// so rollback can rebuild the command.
@@ -69,9 +75,15 @@ impl Store {
             .unwrap_or_default()
     }
 
+    /// Writes via a sibling temp file plus rename, which is atomic on the same
+    /// filesystem: readers always see a complete old or new file, never a
+    /// partial write from a crash mid-write.
     fn write_json<T: Serialize>(path: &Path, value: &T) {
         if let Ok(s) = serde_json::to_string_pretty(value) {
-            let _ = std::fs::write(path, s);
+            let tmp = path.with_extension("json.tmp");
+            if std::fs::write(&tmp, s).is_ok() {
+                let _ = std::fs::rename(&tmp, path);
+            }
         }
     }
 
@@ -80,6 +92,7 @@ impl Store {
     }
 
     pub fn set_pin(&self, pkg: &str, on: bool) {
+        let _g = STORE_LOCK.lock().unwrap();
         let mut pins = self.pins();
         if on {
             pins.insert(pkg.to_string());
@@ -97,6 +110,7 @@ impl Store {
     }
 
     pub fn add_history(&self, entry: HistoryEntry) {
+        let _g = STORE_LOCK.lock().unwrap();
         let mut h: Vec<HistoryEntry> = Self::read_json(&self.history_path());
         h.push(entry);
         Self::write_json(&self.history_path(), &h);
@@ -111,6 +125,7 @@ impl Store {
     }
 
     pub fn set_settings(&self, s: &Settings) {
+        let _g = STORE_LOCK.lock().unwrap();
         Self::write_json(&self.settings_path(), s);
     }
 
@@ -196,6 +211,50 @@ mod tests {
         std::fs::create_dir_all(s_dir(&s)).unwrap();
         std::fs::write(s_dir(&s).join("pins.json"), b"not json").unwrap();
         assert!(s.pins().is_empty()); // corrupt -> empty, no panic
+                                      // Later plans may want to surface this to the user instead of silently
+                                      // treating it as empty; for now the fallback behavior is unchanged.
+    }
+
+    #[test]
+    fn add_history_roundtrip_leaves_no_tmp_file() {
+        let s = temp_store();
+        s.add_history(HistoryEntry {
+            ts: 1,
+            pkg: "a".into(),
+            eco: "npm".into(),
+            action: "install".into(),
+            from: None,
+            to: "1.0".into(),
+        });
+        let h = s.history();
+        assert_eq!(h.len(), 1);
+        assert_eq!(h[0].pkg, "a");
+        assert!(!s.dir_for_test().join("history.json.tmp").exists());
+    }
+
+    #[test]
+    fn concurrent_add_history_does_not_lose_entries() {
+        use std::sync::Arc;
+        let s = Arc::new(temp_store());
+        let handles: Vec<_> = (0..8)
+            .map(|i| {
+                let s = Arc::clone(&s);
+                std::thread::spawn(move || {
+                    s.add_history(HistoryEntry {
+                        ts: i,
+                        pkg: format!("pkg{}", i),
+                        eco: "npm".into(),
+                        action: "install".into(),
+                        from: None,
+                        to: "1.0".into(),
+                    });
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        assert_eq!(s.history().len(), 8);
     }
 
     fn s_dir(s: &Store) -> PathBuf {
