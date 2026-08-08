@@ -67,19 +67,57 @@ pub(crate) fn path_mtime(path: &std::path::Path) -> i64 {
 /// Aggregate across all sources, marking rows whose pkg is in `pins`.
 /// Only sources enabled in `sources` are scanned.
 pub fn scan_all(pins: &std::collections::BTreeSet<String>, sources: Sources) -> Vec<InstalledTool> {
+    // Fan out the four independent scanners concurrently, mirroring
+    // search::search_all: three of them block on a package-manager network
+    // call in a subprocess (`npm outdated`, `brew outdated`, `pip list
+    // --outdated`), so running them in parallel makes total latency the
+    // slowest source rather than the sum. manual must run AFTER the join: it
+    // needs `other_names` built from the other four sources' results, so it
+    // stays sequential. A panicking source thread degrades to an empty vec,
+    // matching each scanner's own no-op-on-failure behavior.
+    let (npm_rows, brew_rows, pip_rows, npx_rows) = std::thread::scope(|s| {
+        let n = s.spawn(|| {
+            if sources.npm {
+                npm::scan_npm()
+            } else {
+                Vec::new()
+            }
+        });
+        let b = s.spawn(|| {
+            if sources.brew {
+                brew::scan_brew()
+            } else {
+                Vec::new()
+            }
+        });
+        let p = s.spawn(|| {
+            if sources.pip {
+                pip::scan_pip()
+            } else {
+                Vec::new()
+            }
+        });
+        let x = s.spawn(|| {
+            if sources.npx {
+                npx::scan_npx()
+            } else {
+                Vec::new()
+            }
+        });
+        (
+            n.join().unwrap_or_default(),
+            b.join().unwrap_or_default(),
+            p.join().unwrap_or_default(),
+            x.join().unwrap_or_default(),
+        )
+    });
+
     let mut all = Vec::new();
-    if sources.npm {
-        all.extend(npm::scan_npm());
-    }
-    if sources.brew {
-        all.extend(brew::scan_brew());
-    }
-    if sources.pip {
-        all.extend(pip::scan_pip());
-    }
-    if sources.npx {
-        all.extend(npx::scan_npx());
-    }
+    all.extend(npm_rows);
+    all.extend(brew_rows);
+    all.extend(pip_rows);
+    all.extend(npx_rows);
+
     if sources.manual {
         let other_names: std::collections::BTreeSet<String> =
             all.iter().map(|t| t.name.clone()).collect();
