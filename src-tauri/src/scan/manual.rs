@@ -74,6 +74,14 @@ fn managed_roots() -> Vec<PathBuf> {
     if let Some(root) = super::npm::npm_root() {
         roots.push(root.clone());
     }
+    // Resolved cargo install root's bin/ dir (plan 024 decision 1): not
+    // hardcoded to ~/.cargo like the toolchain entry above, so a custom
+    // CARGO_INSTALL_ROOT or cargo config `install.root` is excluded too, not
+    // just the default location (the twice-shipped M9 regression class: a
+    // package manager's actual configured root, not an assumed default).
+    if let Some(root) = super::cargo::cargo_root() {
+        roots.push(root.join("bin"));
+    }
     // pip user console-script dir (e.g. ~/Library/Python/3.x/bin/<script>), the
     // macOS `pip3 install` default. The pip row name is the distribution name,
     // not the script basename, so only a path root catches these. The GLOBAL
@@ -494,6 +502,37 @@ mod tests {
             &names
         ));
         // a genuinely-manual tool: not excluded
+        assert!(!is_managed(
+            Path::new("/Users/x/.local/bin/agy"),
+            "agy",
+            &roots,
+            &names
+        ));
+    }
+
+    #[test]
+    fn custom_cargo_install_root_bin_dir_is_excluded_not_just_default_home_cargo() {
+        // Plan 024 decision 1 / the twice-shipped M9 regression class: the
+        // exclusion must be the RESOLVED cargo install root, not a hardcoded
+        // assumption that it's always ~/.cargo. Simulate what managed_roots()
+        // would produce for a CARGO_INSTALL_ROOT override, entirely outside
+        // any $HOME-relative path, and confirm is_managed excludes it.
+        let mut roots: Vec<PathBuf> = vec![
+            PathBuf::from("/opt/homebrew"),
+            PathBuf::from("/Users/x/.cargo"), // the default entry
+            PathBuf::from("/opt/cargo-custom/bin"), // the resolved custom root's bin/
+        ];
+        roots.sort();
+        let names = BTreeSet::new();
+
+        assert!(is_managed(
+            Path::new("/opt/cargo-custom/bin/ripgrep"),
+            "ripgrep",
+            &roots,
+            &names
+        ));
+        // A binary elsewhere on $PATH, not under the custom root or any other
+        // managed prefix, must still be treated as genuinely manual.
         assert!(!is_managed(
             Path::new("/Users/x/.local/bin/agy"),
             "agy",

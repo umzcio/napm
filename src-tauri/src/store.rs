@@ -28,6 +28,7 @@ pub struct Sources {
     pub brew: bool,
     pub pip: bool,
     pub npx: bool,
+    pub cargo: bool,
     pub manual: bool,
 }
 impl Default for Sources {
@@ -37,6 +38,7 @@ impl Default for Sources {
             brew: true,
             pip: true,
             npx: true,
+            cargo: true,
             manual: true,
         }
     }
@@ -335,6 +337,7 @@ mod tests {
         let def = s.settings();
         assert_eq!(def.github_token, "");
         assert!(def.sources.npm && def.sources.brew && def.sources.pip && def.sources.npx);
+        assert!(def.sources.cargo);
         assert!(def.probe_manual);
         assert!(def.advisory_checks);
         s.set_settings(&Settings {
@@ -344,6 +347,7 @@ mod tests {
                 brew: false,
                 pip: true,
                 npx: true,
+                cargo: false,
                 manual: true,
             },
             probe_manual: false,
@@ -352,6 +356,7 @@ mod tests {
         let got = s.settings();
         assert_eq!(got.github_token, "abc");
         assert!(!got.sources.brew);
+        assert!(!got.sources.cargo);
         assert!(got.sources.npm && got.sources.pip);
         assert!(!got.probe_manual);
         assert!(!got.advisory_checks);
@@ -405,6 +410,7 @@ mod tests {
         let def = s.settings();
         assert_eq!(def.github_token, "");
         assert!(def.sources.brew); // corrupt -> all sources on, no panic
+        assert!(def.sources.cargo); // corrupt -> cargo source on too, no panic
         assert!(def.probe_manual); // corrupt -> probing on (default), no panic
         assert!(def.advisory_checks); // corrupt -> advisory checks on (default), no panic
     }
@@ -423,6 +429,7 @@ mod tests {
         let got = s.settings();
         assert!(!got.sources.npm);
         assert!(got.sources.brew && got.sources.pip && got.sources.npx && got.sources.manual);
+        assert!(got.sources.cargo);
         assert_eq!(got.github_token, "");
     }
 
@@ -441,6 +448,24 @@ mod tests {
         let got = s.settings();
         assert_eq!(got.github_token, "abc");
         assert!(got.probe_manual);
+    }
+
+    #[test]
+    fn old_settings_file_without_cargo_source_key_defaults_to_true() {
+        // Simulates a settings.json written before the cargo source existed:
+        // its "sources" object has no "cargo" key at all. It must still
+        // parse, and cargo scanning must default on so upgrading users see
+        // no behavior change (they simply gain a new source, not a disabled one).
+        let s = temp_store();
+        std::fs::create_dir_all(s.dir_for_test()).unwrap();
+        std::fs::write(
+            s.dir_for_test().join("settings.json"),
+            br#"{"githubToken":"abc","sources":{"npm":true,"brew":true,"pip":true,"npx":true,"manual":true}}"#,
+        )
+        .unwrap();
+        let got = s.settings();
+        assert_eq!(got.github_token, "abc");
+        assert!(got.sources.cargo);
     }
 
     #[test]
