@@ -326,10 +326,11 @@
   };
   var HANDLES=["npstr_user_2001","l33t_w4rez","fast_pipe_99","t0tally_legit","dialup_dan","cd_burner","kazaa_refugee"];
 
-  // "update" only when the latest is genuinely NEWER than installed. A private or
-  // scope-shadowed package can report a lower public "latest" (a downgrade); that
-  // must not show as an available update.
-  function statusOf(t){ if(t.eco==="manual") return "unmanaged"; if(!t.installed) return "offline"; if(t.installed===t.latest) return "current"; return verCmp(t.latest,t.installed)<0?"current":"update"; }
+  // Status is computed in Rust (scan::version::status_of, which handles the
+  // "update only when latest is genuinely newer" and downgrade logic) and
+  // shipped on every tool as t.status; this just reads it so call sites do
+  // not change.
+  function statusOf(t){ return t.status; }
   function ping(n){ var h=0; for(var i=0;i<n.length;i++) h=(h*31+n.charCodeAt(i))>>>0; return 8+(h%320); }
   function handleFor(n){ var h=0; for(var i=0;i<n.length;i++) h=(h*31+n.charCodeAt(i))>>>0; return HANDLES[h%HANDLES.length]; }
   function fmtDl(n){ if(n>=1e6) return (n/1e6).toFixed(n>=1e7?0:1).replace(/\.0$/,"")+"M"; if(n>=1e3) return Math.round(n/1e3)+"K"; return ""+n; }
@@ -361,12 +362,11 @@
   // 0 = patch only, 1 = up to minor, 2 = bleeding edge. Persisted in localStorage.
   var APPETITE = 1;
   var APP_LABELS = ["patch only","up to minor","bleeding edge"];
-  function verParts(v){ var p=String(v||"").split(".").slice(0,3).map(function(x){ var m=/^\d+/.exec(x); return m?parseInt(m[0],10):0; }); while(p.length<3) p.push(0); return p; }
-  function verCmp(a,b){ var x=verParts(a),y=verParts(b); for(var k=0;k<3;k++){ if(x[k]!==y[k]) return x[k]-y[k]; } return 0; }
-  function bumpKind(a,b){ if(!a||!b||a===b) return "none"; var x=verParts(a),y=verParts(b);
-    if(y[0]!==x[0]) return "major"; if(y[1]!==x[1]) return "minor"; return "patch"; }
+  // Bump size is computed in Rust (scan::version::bump_kind) and shipped on
+  // every tool as t.bump; this just reads it so call sites do not change.
+  function bumpOf(t){ return t.bump; }
   function isSafe(kind){ if(kind==="none") return false; if(APPETITE>=2) return true; if(APPETITE>=1) return kind!=="major"; return kind==="patch"; }
-  function safeCount(){ return TOOLS.filter(function(t){ return statusOf(t)==="update" && t.eco!=="npx" && !t.pinned && isSafe(bumpKind(t.installed,t.latest)); }).length; }
+  function safeCount(){ return TOOLS.filter(function(t){ return statusOf(t)==="update" && t.eco!=="npx" && !t.pinned && isSafe(bumpOf(t)); }).length; }
 
   // ---- LIBRARY -----------------------------------------------------------
   function renderRows(){
@@ -389,7 +389,7 @@
       var npx = t.eco==="npx";
       var manual = t.eco==="manual";
       var st=statusOf(t), off=st==="offline";
-      var kind = (st==="update"&&!npx) ? bumpKind(t.installed,t.latest) : "none";
+      var kind = (st==="update"&&!npx) ? bumpOf(t) : "none";
       var safe = st==="update" && !npx && isSafe(kind);
       var held = st==="update" && !npx && !safe;
       var drift = (npx && NPX_DRIFT[t.pkg]) ? h`<div class="muted" style="font-size:11px">cached v${t.installed}, npx pulls v${NPX_DRIFT[t.pkg]} on next run</div>` : '';
@@ -511,7 +511,7 @@
       if(statusOf(TOOLS[ti])==="update"){ queueTransfer(TOOLS[ti], TOOLS[ti].latest, "update"); switchTab("transfers"); }
       return;
     }
-    var newTool={name:p.name, eco:p.eco, pkg:p.pkg, installed:null, latest:p.version, size:p.size||"", publisher:"", description:p.description||"", updated:0, pinned:false, requested:true};
+    var newTool={name:p.name, eco:p.eco, pkg:p.pkg, installed:null, latest:p.version, size:p.size||"", publisher:"", description:p.description||"", updated:0, pinned:false, requested:true, status:"offline", bump:"none"};
     TOOLS.push(newTool);
     queueTransfer(newTool, p.version, "install");
     switchTab("transfers");
@@ -521,7 +521,7 @@
   function verdictScope(){
     // outdated, non-npx, unpinned, within the current appetite dial.
     return TOOLS.filter(function(t){
-      return statusOf(t)==="update" && t.eco!=="npx" && !t.pinned && isSafe(bumpKind(t.installed,t.latest));
+      return statusOf(t)==="update" && t.eco!=="npx" && !t.pinned && isSafe(bumpOf(t));
     }).map(function(t){ return t.pkg; });
   }
   function loadWhatsNew(){
@@ -782,7 +782,7 @@
   document.getElementById("searchBtn").addEventListener("click",function(){ runSearch(document.getElementById("search").value.trim()); });
   document.getElementById("search").addEventListener("keydown",function(e){ if(e.key==="Enter") runSearch(this.value.trim()); });
   document.getElementById("updateAll").addEventListener("click",function(){
-    TOOLS.forEach(function(t,i){ if(statusOf(t)==="update"&&t.eco!=="npx"&&!t.pinned&&isSafe(bumpKind(t.installed,t.latest))) queueTransfer(t,t.latest,"update"); }); switchTab("transfers");
+    TOOLS.forEach(function(t,i){ if(statusOf(t)==="update"&&t.eco!=="npx"&&!t.pinned&&isSafe(bumpOf(t))) queueTransfer(t,t.latest,"update"); }); switchTab("transfers");
   });
   rowsEl.addEventListener("click",function(e){
     var p=e.target.closest("[data-pin]");
