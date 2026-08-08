@@ -43,11 +43,27 @@ impl Default for Sources {
 }
 
 /// Persisted user settings. Missing or corrupt file reads as defaults.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub github_token: String,
     pub sources: Sources,
+    /// Whether the manual scanner may run `<tool> --version`/`version` on
+    /// $HOME binaries whose filename carries no version token. Defaults to
+    /// true (existing behavior); an old settings.json missing this key still
+    /// deserializes to true via `#[serde(default)]` reading the field off
+    /// `Settings::default()` below.
+    pub probe_manual: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            github_token: String::new(),
+            sources: Sources::default(),
+            probe_manual: true,
+        }
+    }
 }
 
 /// Flat-JSON persistence for pins and history in a single directory.
@@ -292,6 +308,7 @@ mod tests {
         let def = s.settings();
         assert_eq!(def.github_token, "");
         assert!(def.sources.npm && def.sources.brew && def.sources.pip && def.sources.npx);
+        assert!(def.probe_manual);
         s.set_settings(&Settings {
             github_token: "abc".into(),
             sources: Sources {
@@ -301,11 +318,13 @@ mod tests {
                 npx: true,
                 manual: true,
             },
+            probe_manual: false,
         });
         let got = s.settings();
         assert_eq!(got.github_token, "abc");
         assert!(!got.sources.brew);
         assert!(got.sources.npm && got.sources.pip);
+        assert!(!got.probe_manual);
     }
 
     #[test]
@@ -316,6 +335,7 @@ mod tests {
         s.set_settings(&Settings {
             github_token: "secret-token".into(),
             sources: Sources::default(),
+            probe_manual: true,
         });
         let perm = std::fs::metadata(s.dir_for_test().join("settings.json"))
             .unwrap()
@@ -354,6 +374,7 @@ mod tests {
         let def = s.settings();
         assert_eq!(def.github_token, "");
         assert!(def.sources.brew); // corrupt -> all sources on, no panic
+        assert!(def.probe_manual); // corrupt -> probing on (default), no panic
     }
 
     #[test]
@@ -371,6 +392,23 @@ mod tests {
         assert!(!got.sources.npm);
         assert!(got.sources.brew && got.sources.pip && got.sources.npx && got.sources.manual);
         assert_eq!(got.github_token, "");
+    }
+
+    #[test]
+    fn old_settings_file_without_probe_manual_key_defaults_to_true() {
+        // Simulates a settings.json written before this field existed: no
+        // "probeManual" key at all. It must still parse, and probing must
+        // default on so upgrading users see no behavior change.
+        let s = temp_store();
+        std::fs::create_dir_all(s.dir_for_test()).unwrap();
+        std::fs::write(
+            s.dir_for_test().join("settings.json"),
+            br#"{"githubToken":"abc","sources":{"npm":true,"brew":true,"pip":true,"npx":true,"manual":true}}"#,
+        )
+        .unwrap();
+        let got = s.settings();
+        assert_eq!(got.github_token, "abc");
+        assert!(got.probe_manual);
     }
 
     #[test]

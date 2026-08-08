@@ -65,12 +65,13 @@ pub(crate) fn path_mtime(path: &std::path::Path) -> i64 {
 }
 
 /// Aggregate across all sources, marking rows whose pkg is in `pins`.
-/// Only sources enabled in `sources` are scanned. `cache_dir` is passed
-/// through to the manual scanner, which caches its `<tool> --version`
-/// probing of $HOME binaries there (see `manual::scan_manual`).
+/// Only sources enabled in `sources` are scanned. `probe_manual` and
+/// `cache_dir` are passed through to the manual scanner: they gate and cache
+/// its `<tool> --version` probing of $HOME binaries (see `manual::scan_manual`).
 pub fn scan_all(
     pins: &std::collections::BTreeSet<String>,
     sources: Sources,
+    probe_manual: bool,
     cache_dir: &std::path::Path,
 ) -> Vec<InstalledTool> {
     // Fan out the four independent scanners concurrently, mirroring
@@ -127,7 +128,7 @@ pub fn scan_all(
     if sources.manual {
         let other_names: std::collections::BTreeSet<String> =
             all.iter().map(|t| t.name.clone()).collect();
-        all.extend(manual::scan_manual(&other_names, cache_dir));
+        all.extend(manual::scan_manual(&other_names, probe_manual, cache_dir));
     }
     for row in all.iter_mut() {
         row.pinned = pins.contains(&row.pkg);
@@ -163,7 +164,7 @@ mod tests {
             manual: false,
         };
         assert_eq!(
-            scan_all(&pins, sources, std::path::Path::new("/tmp")),
+            scan_all(&pins, sources, true, std::path::Path::new("/tmp")),
             Vec::new()
         );
     }
