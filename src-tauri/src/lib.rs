@@ -199,12 +199,17 @@ fn clear_caches(app: tauri::AppHandle) {
     // Drop the in-memory parsed catalog too, else the fresh in-memory copy masks
     // the deletion and the re-warm below just returns the stale data.
     search::brew::invalidate_catalog();
-    // Remove the per-version changelog and hold caches (changelog_*.json, hold_*.json).
+    // Same for the in-memory registry-document cache.
+    intel::registry::invalidate();
+    // Remove the per-version changelog/hold caches and the registry-document
+    // cache (changelog_*.json, hold_*.json, regdoc_*.json).
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for e in entries.flatten() {
             let n = e.file_name();
             let n = n.to_string_lossy();
-            if (n.starts_with("changelog_") || n.starts_with("hold_")) && n.ends_with(".json") {
+            if (n.starts_with("changelog_") || n.starts_with("hold_") || n.starts_with("regdoc_"))
+                && n.ends_with(".json")
+            {
                 let _ = std::fs::remove_file(e.path());
             }
         }
