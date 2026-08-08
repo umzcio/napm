@@ -1172,6 +1172,7 @@
       '<input id="prefToken" type="password" class="search" style="width:100%;margin-top:4px" value="'+esc(s.githubToken||"")+'">'+
       '<label style="display:block;margin-top:4px;font-size:11px"><input type="checkbox" id="prefTokenShow"> show</label></div>'+
       '<div style="margin-top:10px"><b>Sources</b>'+rows+'</div>'+
+      '<div style="margin-top:10px"><label style="display:block"><input type="checkbox" id="prefProbeManual"'+(s.probeManual!==false?' checked':'')+'> Run manual tools with --version to read their version (executes binaries found on your PATH)</label></div>'+
       '<div style="margin-top:12px;text-align:right"><button class="btn" data-close>Cancel</button> <button class="btn primary" data-prefs-save>Save</button></div>'+
       '</div>';
     document.getElementById("modalBack").style.display="flex";
@@ -1207,7 +1208,8 @@
           pip:document.getElementById("prefSrc_pip").checked,
           npx:document.getElementById("prefSrc_npx").checked,
           manual:document.getElementById("prefSrc_manual").checked
-        }
+        },
+        probeManual:document.getElementById("prefProbeManual").checked
       };
       SETTINGS=settings; // View menu's "off in Preferences" greying reflects the save immediately
       closeModal();

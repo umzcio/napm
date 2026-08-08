@@ -87,9 +87,10 @@ fn managed_roots() -> Vec<PathBuf> {
 }
 
 /// What to do to determine a candidate's version, decided WITHOUT running
-/// anything: a filename token, a cached probe result, or "no version" (the
-/// binary is outside $HOME). Only `Probe` requires spawning a process, via
-/// `probe_version` below.
+/// anything: a filename token, a cached probe result, or "no version" (probing
+/// disabled or the binary is outside $HOME). Only `Probe` requires spawning a
+/// process, via `probe_version` below. Keeping this decision pure/side-effect
+/// free is what makes "probing disabled never executes a binary" testable.
 #[derive(Debug, PartialEq)]
 enum VersionPlan {
     Known(String),
@@ -98,15 +99,23 @@ enum VersionPlan {
 
 /// Decide the version plan for a resolved binary path. Mirrors the previous
 /// `resolve_version`'s precedence: a filename token first (free); then, only
-/// when the binary resolves under $HOME, a cached result if one matches, else
-/// a request to probe.
+/// when probing is enabled and the binary resolves under $HOME, a cached
+/// result if one matches, else a request to probe.
 /// `-v` is intentionally not probed: it commonly means "verbose" and can start
 /// a real or long-running process on an unknown binary.
-fn plan_version(real: &Path, home: Option<&Path>, cached: Option<&str>) -> VersionPlan {
+fn plan_version(
+    real: &Path,
+    home: Option<&Path>,
+    probe_manual: bool,
+    cached: Option<&str>,
+) -> VersionPlan {
     if let Some(name) = real.file_name().and_then(|n| n.to_str()) {
         if let Some(v) = first_version(name) {
             return VersionPlan::Known(v);
         }
+    }
+    if !probe_manual {
+        return VersionPlan::Known(String::new());
     }
     let under_home = match home {
         Some(h) => real.starts_with(h),
@@ -232,8 +241,15 @@ struct Candidate {
 /// resolving symlinks, excluding managed/app/toolchain/system paths and names
 /// already returned by the other scanners, deduped by resolved target.
 /// `other_names` is the set of tool names from the npm/brew/pip/npx scans.
+/// `probe_manual` gates running `<tool> --version`/`version` on $HOME
+/// binaries whose filename carries no version (see `plan_version`); when
+/// false, such binaries show an empty version and nothing is executed.
 /// `cache_dir` is where `manual_probe.json` is read from and written to.
-pub fn scan_manual(other_names: &BTreeSet<String>, cache_dir: &Path) -> Vec<InstalledTool> {
+pub fn scan_manual(
+    other_names: &BTreeSet<String>,
+    probe_manual: bool,
+    cache_dir: &Path,
+) -> Vec<InstalledTool> {
     let home = std::env::var_os("HOME").map(PathBuf::from);
     let roots = managed_roots();
     let path = match std::env::var_os("PATH") {
@@ -285,8 +301,15 @@ pub fn scan_manual(other_names: &BTreeSet<String>, cache_dir: &Path) -> Vec<Inst
     }
 
     // Phase 2: decide each candidate's version plan against the cache, then
-    // resolve the cache-miss subset on a bounded worker pool.
-    let mut cache = load_probe_cache(cache_dir);
+    // resolve the cache-miss subset on a bounded worker pool. Loading/saving
+    // the cache is skipped entirely when probing is disabled: the gate path
+    // never touches the probe cache file, matching "no execution, no I/O
+    // beyond filename parsing".
+    let mut cache = if probe_manual {
+        load_probe_cache(cache_dir)
+    } else {
+        ProbeCache::default()
+    };
 
     let mut plans: Vec<VersionPlan> = Vec::with_capacity(candidates.len());
     let mut miss_indices: Vec<usize> = Vec::new();
@@ -297,7 +320,7 @@ pub fn scan_manual(other_names: &BTreeSet<String>, cache_dir: &Path) -> Vec<Inst
             .get(&key)
             .filter(|e| e.mtime == c.mtime && e.size == c.size)
             .map(|e| e.version.as_str());
-        let plan = plan_version(&c.real, home.as_deref(), cached);
+        let plan = plan_version(&c.real, home.as_deref(), probe_manual, cached);
         if plan == VersionPlan::Probe {
             miss_indices.push(i);
         }
@@ -333,7 +356,9 @@ pub fn scan_manual(other_names: &BTreeSet<String>, cache_dir: &Path) -> Vec<Inst
             );
             plans[idx] = VersionPlan::Known(version);
         }
-        save_probe_cache(cache_dir, &cache);
+        if probe_manual {
+            save_probe_cache(cache_dir, &cache);
+        }
     }
 
     // Phase 3: assemble rows in candidate (original walk) order.
@@ -572,7 +597,7 @@ mod tests {
         assert_eq!(cached, Some(""));
 
         // plan_version must treat this as Known(""), not Probe.
-        let plan = plan_version(Path::new("/Users/x/.local/bin/mystery"), None, cached);
+        let plan = plan_version(Path::new("/Users/x/.local/bin/mystery"), None, true, cached);
         assert_eq!(plan, VersionPlan::Known(String::new()));
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -596,26 +621,95 @@ mod tests {
     }
 
     #[test]
-    fn plan_outside_home_never_requests_a_probe() {
+    fn plan_enabled_outside_home_never_requests_a_probe() {
         let home = Path::new("/Users/x");
         let real = Path::new("/opt/local/bin/mystery");
-        let plan = plan_version(real, Some(home), None);
+        let plan = plan_version(real, Some(home), true, None);
         assert_eq!(plan, VersionPlan::Known(String::new()));
     }
 
     #[test]
-    fn plan_under_home_with_no_cache_requests_a_probe() {
+    fn plan_enabled_under_home_with_no_cache_requests_a_probe() {
         let home = Path::new("/Users/x");
         let real = Path::new("/Users/x/.local/bin/mystery");
-        let plan = plan_version(real, Some(home), None);
+        let plan = plan_version(real, Some(home), true, None);
         assert_eq!(plan, VersionPlan::Probe);
     }
 
     #[test]
-    fn plan_under_home_with_matching_cache_is_known() {
+    fn plan_enabled_under_home_with_matching_cache_is_known() {
         let home = Path::new("/Users/x");
         let real = Path::new("/Users/x/.local/bin/mystery");
-        let plan = plan_version(real, Some(home), Some("1.2.3"));
+        let plan = plan_version(real, Some(home), true, Some("1.2.3"));
         assert_eq!(plan, VersionPlan::Known("1.2.3".to_string()));
+    }
+
+    #[test]
+    fn plan_disabled_never_requests_a_probe() {
+        // probe_manual=false: even a $HOME binary with no filename version and
+        // no cache entry must resolve to Known(""), never Probe (which is the
+        // only variant that leads to spawning a process).
+        let home = Path::new("/Users/x");
+        let real = Path::new("/Users/x/.local/bin/mystery");
+        let plan = plan_version(real, Some(home), false, None);
+        assert_eq!(plan, VersionPlan::Known(String::new()));
+    }
+
+    #[test]
+    fn plan_filename_version_wins_even_when_probing_disabled() {
+        let real = Path::new("/Users/x/.local/bin/grok-0.2.14");
+        let plan = plan_version(real, None, false, None);
+        assert_eq!(plan, VersionPlan::Known("0.2.14".to_string()));
+    }
+
+    #[test]
+    fn scan_manual_disabled_probing_yields_no_probe_but_still_finds_candidates() {
+        // End-to-end: a fake $PATH dir with one $HOME-resolved executable that
+        // has no filename version. With probe_manual=false, scan_manual must
+        // return it with an empty version and must not touch the probe cache
+        // file at all (no spawn, no cache I/O).
+        let base = temp_cache_dir("scan-disabled");
+        let home = base.join("home");
+        let bindir = home.join("bin");
+        std::fs::create_dir_all(&bindir).unwrap();
+        let bin_path = bindir.join("mystery");
+        std::fs::write(&bin_path, "#!/bin/sh\necho hi\n").unwrap();
+        std::fs::set_permissions(&bin_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let cache_dir = base.join("cache");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+
+        // SAFETY: test-only env mutation, restored at the end; napm's test
+        // suite does not run these manual.rs env-dependent tests concurrently
+        // with other HOME/PATH-sensitive tests within this process by design
+        // (each such test fully owns and restores HOME/PATH around its body).
+        let old_home = std::env::var_os("HOME");
+        let old_path = std::env::var_os("PATH");
+        unsafe {
+            std::env::set_var("HOME", &home);
+            std::env::set_var("PATH", &bindir);
+        }
+
+        let other_names = BTreeSet::new();
+        let rows = scan_manual(&other_names, false, &cache_dir);
+
+        unsafe {
+            match old_home {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+            match old_path {
+                Some(v) => std::env::set_var("PATH", v),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+
+        assert!(rows.iter().any(|r| r.name == "mystery"));
+        let row = rows.iter().find(|r| r.name == "mystery").unwrap();
+        assert_eq!(row.installed.as_deref(), Some(""));
+        // Probing was off, so the cache file must never have been written.
+        assert!(!probe_cache_path(&cache_dir).exists());
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

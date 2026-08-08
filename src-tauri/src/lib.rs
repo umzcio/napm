@@ -23,7 +23,8 @@ fn open_store(app: &tauri::AppHandle) -> Store {
 fn scan_installed(app: tauri::AppHandle) -> Vec<InstalledTool> {
     let store = open_store(&app);
     let pins = store.pins();
-    scan::scan_all(&pins, store.settings().sources, store.dir())
+    let settings = store.settings();
+    scan::scan_all(&pins, settings.sources, settings.probe_manual, store.dir())
 }
 
 #[tauri::command(async)]
