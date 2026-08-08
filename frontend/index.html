@@ -304,6 +304,9 @@
 
   // ---- INSTALLED PACKAGES (your Shared Library) --------------------------
   var TOOLS = [];
+  // Set true when scan_installed rejects, so an empty TOOLS list renders as
+  // "could not scan" rather than an indistinguishable "you have no packages".
+  var SCAN_FAILED = false;
 
   // ---- THE SWARM (registry search results) --------------------------------
   // Populated by live calls to search_registry; empty until a search runs.
@@ -367,6 +370,11 @@
   // ---- LIBRARY -----------------------------------------------------------
   function renderRows(){
     rowsEl.innerHTML="";
+    if(SCAN_FAILED && !TOOLS.length){
+      rowsEl.innerHTML=h`<tr><td colspan="9" class="empty">Could not scan your library. This is not an empty library. Use File, then Rescan now, to retry.</td></tr>`;
+      renderStatus();
+      return;
+    }
     var display=TOOLS.map(function(t,i){return {t:t,i:i};}).filter(function(x){
       var t=x.t;
       if(VIEW.requested && t.requested===false) return false;
@@ -598,7 +606,9 @@
         body=h`<div>${it.blurb}</div><div class="signal ${it.rec==="malicious"?"danger":"warn"}"><span class="lbl">${it.id}:</span> ${raw(txt)}</div>`+act;
       } else {
         var log=it.changelog.length?('<ul>'+it.changelog.map(function(c){return h`<li>${c}</li>`;}).join("")+'</ul>')
-          :(it.loaded?'<div class="muted">No changelog available.</div>':'<div class="muted">Expand to load changelog\u2026</div>');
+          :(it.loadFailed?'<div class="muted">Changelog unavailable, could not reach the registry.</div>'
+            :it.loaded?'<div class="muted">No changelog available.</div>'
+            :'<div class="muted">Expand to load changelog\u2026</div>');
         body=h`<div>${it.blurb}</div><div style="font-weight:bold;margin-top:6px">What changed</div>`+log+act;
       }
       var card=document.createElement("div"); card.className="card raised"+(it.open?" open":"");
@@ -647,21 +657,22 @@
       var isOpen=c.classList.contains("open");
       h.querySelector(".caret").textContent=isOpen?"\u2013":"+";
       if(it) it.open=isOpen; // persist across the re-render after a lazy changelog load
-      if(isOpen && it && !it.loaded){
-        it.loaded=true;
-        if(inv()){
-          if(it.id && !it.detailLoaded){
-            // alert card: lazy-load the advisory detail (summary + fixed version)
-            call("get_advisory",{id:it.id}).then(function(d){
-              it.detailLoaded=true;
-              if(d){ if(d.summary) it.blurb=d.summary; if(d.fixedVersion) it.fix=d.fixedVersion; }
-              renderFeed();
-            }).catch(function(){ it.detailFailed=true; it.detailLoaded=true; renderFeed(); });
-          } else if(!it.id){
-            // verdict card: lazy-load the changelog
-            var ver=it.fix||(it.ti>=0?TOOLS[it.ti].latest:it.pkg);
-            call("get_changelog",{eco:it.eco,pkg:it.pkg,version:ver}).then(function(log){ it.changelog=log||[]; renderFeed(); }).catch(function(){ renderFeed(); });
-          }
+      // fetchTried guards against re-issuing the lazy fetch on every re-expand;
+      // it.loaded/it.loadFailed (below) reflect the outcome, not the attempt,
+      // so a failed fetch renders honestly instead of a false "no changelog".
+      if(isOpen && it && !it.fetchTried && inv()){
+        it.fetchTried=true;
+        if(it.id && !it.detailLoaded){
+          // alert card: lazy-load the advisory detail (summary + fixed version)
+          call("get_advisory",{id:it.id}).then(function(d){
+            it.detailLoaded=true;
+            if(d){ if(d.summary) it.blurb=d.summary; if(d.fixedVersion) it.fix=d.fixedVersion; }
+            renderFeed();
+          }).catch(function(){ it.detailFailed=true; it.detailLoaded=true; renderFeed(); });
+        } else if(!it.id){
+          // verdict card: lazy-load the changelog
+          var ver=it.fix||(it.ti>=0?TOOLS[it.ti].latest:it.pkg);
+          call("get_changelog",{eco:it.eco,pkg:it.pkg,version:ver}).then(function(log){ it.changelog=log||[]; it.loaded=true; renderFeed(); }).catch(function(){ it.loadFailed=true; renderFeed(); });
         }
       }
       return;
@@ -672,6 +683,9 @@
 
   // ---- TRANSFERS ---------------------------------------------------------
   var xfers=[], history=[];
+  // Set true when get_history rejects, so an empty history renders as
+  // "could not load" rather than an indistinguishable "nothing happened yet".
+  var HISTORY_FAILED=false;
   var xferListEl=document.getElementById("xferList"), histWrap=document.getElementById("histWrap"), badge=document.getElementById("xferBadge");
   function renderXfers(){
     if(!xfers.length){ xferListEl.innerHTML='<div class="empty">Nothing transferring.</div>'; }
@@ -691,12 +705,16 @@
     badge.textContent=active; badge.style.display=active?"":"none";
   }
   function loadHistory(){
-    var iv=inv();
-    if(!iv){ history=[]; renderHistory([]); return; }
-    iv("get_history").then(function(h){ history=h||[]; renderHistory(history); }).catch(function(){ history=[]; renderHistory([]); });
+    if(!inv()){ history=[]; renderHistory([]); return; }
+    call("get_history").then(function(h){ history=h||[]; HISTORY_FAILED=false; renderHistory(history); }).catch(function(){ history=[]; HISTORY_FAILED=true; renderHistory([]); });
   }
   function renderHistory(hist){
-    if(!hist || !hist.length){ histWrap.innerHTML='<div class="empty">No version changes yet.</div>'; return; }
+    if(!hist || !hist.length){
+      histWrap.innerHTML = HISTORY_FAILED
+        ? '<div class="empty">Could not load history. This is not an empty history.</div>'
+        : '<div class="empty">No version changes yet.</div>';
+      return;
+    }
     var rows=hist.map(function(h,hi){
       var label=h.action==="update"?"updated":h.action==="rollback"?"rolled back":"installed";
       var canRoll = h.action!=="rollback" && h.from && h.eco!=="brew";
@@ -865,11 +883,16 @@
     if(!inv()){ renderRows(); FEED_LOADED=false; loadWhatsNew(); renderStatus(); dismissSplash(); return; }
     call("scan_installed").then(function(tools){
       TOOLS = tools || [];
+      SCAN_FAILED=false;
       selected=null; // the old index no longer maps into the rebuilt list
       renderRows(); annotateNpxDrift(); FEED_LOADED=false; loadWhatsNew(); renderStatus(); dismissSplash();
       // Once per session, after the UI settles, check for an app update unobtrusively.
       if(!DID_UPDATE_CHECK){ DID_UPDATE_CHECK=true; setTimeout(function(){ checkForUpdate(false); }, 1200); }
-    }).catch(function(e){ console.error("scan_installed failed", e); renderRows(); FEED_LOADED=false; loadWhatsNew(); renderStatus(); dismissSplash(); });
+    }).catch(function(e){
+      console.error("scan_installed failed", e);
+      SCAN_FAILED=true;
+      renderRows(); FEED_LOADED=false; loadWhatsNew(); renderStatus(); dismissSplash();
+    });
   }
   // After the library renders, resolve registry latest for npx tools and flag
   // any whose cached version differs (npx re-resolves @latest on next run).
