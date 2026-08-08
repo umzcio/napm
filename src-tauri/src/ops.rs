@@ -36,11 +36,48 @@ pub fn build_command(
 }
 
 use serde::Serialize;
+use std::collections::HashSet;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
 use tauri::{AppHandle, Emitter};
 
 use crate::store::{HistoryEntry, Store};
+
+/// Packages with an operation currently in flight, keyed by (eco, pkg). Not a
+/// global queue: different packages still run concurrently. This only rejects
+/// a duplicate operation on the SAME package (e.g. a double-click on Get, or
+/// Update All somehow enqueuing the same row twice).
+static IN_FLIGHT: Mutex<Option<HashSet<(String, String)>>> = Mutex::new(None);
+
+/// Try to claim (eco, pkg) as in flight. Returns false when an operation for
+/// it is already running.
+fn try_begin(eco: &str, pkg: &str) -> bool {
+    let mut guard = IN_FLIGHT.lock().unwrap();
+    let set = guard.get_or_insert_with(HashSet::new);
+    set.insert((eco.to_string(), pkg.to_string()))
+}
+
+/// Release the (eco, pkg) claim taken by `try_begin`.
+fn finish(eco: &str, pkg: &str) {
+    let mut guard = IN_FLIGHT.lock().unwrap();
+    if let Some(set) = guard.as_mut() {
+        set.remove(&(eco.to_string(), pkg.to_string()));
+    }
+}
+
+/// RAII guard that releases the (eco, pkg) in-flight claim on drop, so a
+/// panic anywhere in the streaming code cannot leak the claim and permanently
+/// block future operations on that package.
+struct InFlightGuard {
+    eco: String,
+    pkg: String,
+}
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        finish(&self.eco, &self.pkg);
+    }
+}
 
 #[derive(Clone, Serialize)]
 struct LineEvent {
@@ -71,10 +108,34 @@ pub fn run_op(
     action: String,
     ts: i64,
 ) {
+    if !try_begin(&eco, &pkg) {
+        let _ = app.emit(
+            "transfer-line",
+            LineEvent {
+                op_id: op_id.clone(),
+                stream: "stderr".into(),
+                line: format!("another operation for {} is already running", pkg),
+            },
+        );
+        let _ = app.emit(
+            "transfer-done",
+            DoneEvent {
+                op_id,
+                success: false,
+                code: -1,
+            },
+        );
+        return;
+    }
+
     let pip = crate::scan::pip::pip_bin().unwrap_or("pip3");
     let built = build_command(&eco, &pkg, &to, &action, pip);
 
     std::thread::spawn(move || {
+        let _guard = InFlightGuard {
+            eco: eco.clone(),
+            pkg: pkg.clone(),
+        };
         let (prog, args) = match built {
             Some(c) => c,
             None => {
@@ -219,5 +280,27 @@ mod tests {
     #[test]
     fn brew_rollback_is_unsupported() {
         assert!(build_command("brew", "ripgrep", "14.0.0", "rollback", "pip3").is_none());
+    }
+
+    // IN_FLIGHT is process-global state shared across these tests, and tests
+    // may run in parallel, so each test below uses a package name unique to
+    // it (not shared with any other test in this module) to avoid cross-test
+    // interference.
+
+    #[test]
+    fn try_begin_rejects_duplicate_then_allows_after_finish() {
+        assert!(try_begin("npm", "in-flight-dup-test"));
+        assert!(!try_begin("npm", "in-flight-dup-test"));
+        finish("npm", "in-flight-dup-test");
+        assert!(try_begin("npm", "in-flight-dup-test"));
+        finish("npm", "in-flight-dup-test");
+    }
+
+    #[test]
+    fn try_begin_is_independent_per_ecosystem() {
+        assert!(try_begin("npm", "in-flight-eco-test"));
+        assert!(try_begin("pip", "in-flight-eco-test"));
+        finish("npm", "in-flight-eco-test");
+        finish("pip", "in-flight-eco-test");
     }
 }
