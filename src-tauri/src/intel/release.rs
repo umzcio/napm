@@ -143,9 +143,9 @@ pub fn github_repo_from_url(url: &str) -> Option<(String, String)> {
         None => rest,
     };
 
-    let (authority, path) = match rest.find('/') {
-        Some(i) => (&rest[..i], &rest[i + 1..]),
-        None => return None,
+    let (authority, path) = {
+        let i = rest.find('/')?;
+        (&rest[..i], &rest[i + 1..])
     };
     if !authority.eq_ignore_ascii_case("github.com")
         && !authority.eq_ignore_ascii_case("www.github.com")
