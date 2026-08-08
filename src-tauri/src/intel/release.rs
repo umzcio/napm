@@ -120,15 +120,50 @@ pub fn velocity_hold(recent: u64, baseline: u64, days_since: i64) -> Option<u64>
 
 /// Extract (owner, repo) from a GitHub URL in any common form
 /// (git+https://github.com/owner/repo.git, https://github.com/owner/repo, etc).
+/// Strict by design: this feeds authenticated api.github.com requests, and the
+/// URL is registry-supplied (npm repository.url, PyPI project_urls/home_page,
+/// brew homepage), so a package author otherwise controls the request shape.
+/// Requires a known scheme, an authority that is exactly github.com or
+/// www.github.com (not merely containing "github.com/" anywhere in the URL),
+/// and validates both path segments against GitHub's own charset rather than
+/// just trimming punctuation off the end.
 pub fn github_repo_from_url(url: &str) -> Option<(String, String)> {
-    let i = url.find("github.com/")? + "github.com/".len();
-    let rest = &url[i..];
-    let mut parts = rest.split('/');
-    let owner = parts.next()?.trim();
-    let repo = parts.next()?.trim().trim_end_matches(".git");
-    // strip any trailing query/fragment/path on the repo segment
-    let repo = repo.split(['#', '?']).next().unwrap_or(repo);
-    if owner.is_empty() || repo.is_empty() {
+    let rest = url
+        .strip_prefix("git+https://")
+        .or_else(|| url.strip_prefix("https://"))
+        .or_else(|| url.strip_prefix("http://"))
+        .or_else(|| url.strip_prefix("git://"))
+        .or_else(|| url.strip_prefix("ssh://git@"))?;
+
+    // A query string or fragment applies to the whole URL, not to a single
+    // path segment; drop everything from the first '?' or '#' up front so a
+    // stray one embedded mid-path can't be mistaken for part of owner/repo.
+    let rest = match rest.find(['?', '#']) {
+        Some(i) => &rest[..i],
+        None => rest,
+    };
+
+    let (authority, path) = match rest.find('/') {
+        Some(i) => (&rest[..i], &rest[i + 1..]),
+        None => return None,
+    };
+    if !authority.eq_ignore_ascii_case("github.com")
+        && !authority.eq_ignore_ascii_case("www.github.com")
+    {
+        return None;
+    }
+
+    let mut parts = path.split('/');
+    let owner = parts.next()?;
+    let repo = parts.next()?.trim_end_matches(".git");
+
+    let is_owner_char = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
+    let is_repo_char = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_');
+    if owner.is_empty()
+        || repo.is_empty()
+        || !owner.chars().all(is_owner_char)
+        || !repo.chars().all(is_repo_char)
+    {
         return None;
     }
     Some((owner.to_string(), repo.to_string()))
@@ -287,13 +322,18 @@ fn velocity_verdict(
         let body = crate::http::get_with_headers(&url, &headers).ok()?;
         parse_search_total_count(&body)
     };
+    // Belt-and-braces: owner/repo are already gated by github_repo_from_url's
+    // charset check, but encode them anyway before they land in an
+    // authenticated request URL.
+    let enc_owner = crate::http::encode(owner);
+    let enc_repo = crate::http::encode(repo);
     let recent = count(format!(
         "repo:{}/{} type:issue created:>={}",
-        owner, repo, release_ymd
+        enc_owner, enc_repo, release_ymd
     ))?;
     let baseline = count(format!(
         "repo:{}/{} type:issue created:{}..{}",
-        owner, repo, start_ymd, release_ymd
+        enc_owner, enc_repo, start_ymd, release_ymd
     ))?;
     let days_since = ((now - published).max(0)) / 86400;
 
@@ -369,9 +409,11 @@ pub fn changelog(eco: &str, pkg: &str, version: &str, cache_dir: &Path) -> Vec<S
     // Err(()) means the HTTP call itself failed (network / non-2xx).
     let fetch_result: Result<Vec<String>, ()> = (|| {
         let (owner, repo) = github_repo_from_url(repo_url.as_deref()?)?;
+        // Belt-and-braces: see the analogous encode in velocity_verdict's count closure.
         let releases_url = format!(
             "https://api.github.com/repos/{}/{}/releases?per_page=20",
-            owner, repo
+            crate::http::encode(&owner),
+            crate::http::encode(&repo)
         );
         let mut headers: Vec<(&str, &str)> = vec![("Accept", "application/vnd.github+json")];
         // Read the token at call time; store it in a local binding so the reference lives long enough.
@@ -492,5 +534,68 @@ mod tests {
                 "Added a flag".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn github_repo_from_url_accepts_known_good_real_packages() {
+        // npm: TypeScript's registry repository.url.
+        assert_eq!(
+            github_repo_from_url("git+https://github.com/microsoft/TypeScript.git"),
+            Some(("microsoft".to_string(), "TypeScript".to_string()))
+        );
+        // pip: httpie's PyPI project_urls / home_page.
+        assert_eq!(
+            github_repo_from_url("https://github.com/httpie/httpie"),
+            Some(("httpie".to_string(), "httpie".to_string()))
+        );
+    }
+
+    #[test]
+    fn github_repo_from_url_accepts_additional_schemes_and_www() {
+        assert_eq!(
+            github_repo_from_url("ssh://git@github.com/owner/repo"),
+            Some(("owner".to_string(), "repo".to_string()))
+        );
+        assert_eq!(
+            github_repo_from_url("git://github.com/owner/repo"),
+            Some(("owner".to_string(), "repo".to_string()))
+        );
+        assert_eq!(
+            github_repo_from_url("https://www.github.com/owner/repo"),
+            Some(("owner".to_string(), "repo".to_string()))
+        );
+    }
+
+    #[test]
+    fn github_repo_from_url_rejects_loose_host_matches() {
+        // "github.com/" appears as a substring but is not the authority.
+        assert_eq!(
+            github_repo_from_url("https://evil.example/github.com/owner/repo"),
+            None
+        );
+        // Host merely starts with github.com as a subdomain prefix trick.
+        assert_eq!(
+            github_repo_from_url("https://github.com.evil.example/owner/repo"),
+            None
+        );
+    }
+
+    #[test]
+    fn github_repo_from_url_rejects_malformed_segments() {
+        // '#' embedded inside the owner segment truncates the whole path,
+        // dropping the repo segment entirely.
+        assert_eq!(github_repo_from_url("https://github.com/ow#ner/repo"), None);
+        // Same for '?' embedded inside the owner segment.
+        assert_eq!(github_repo_from_url("https://github.com/ow?ner/repo"), None);
+        // '%' is outside both owner and repo charsets.
+        assert_eq!(
+            github_repo_from_url("https://github.com/ow%2fner/repo"),
+            None
+        );
+        // ".." is outside the owner charset (no '.' allowed in owner).
+        assert_eq!(github_repo_from_url("https://github.com/../repo"), None);
+        // Empty owner and empty repo segments.
+        assert_eq!(github_repo_from_url("https://github.com//repo"), None);
+        assert_eq!(github_repo_from_url("https://github.com/owner/"), None);
     }
 }
