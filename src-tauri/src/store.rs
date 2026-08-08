@@ -15,7 +15,7 @@ pub struct HistoryEntry {
     pub ts: i64,
     pub pkg: String,
     pub eco: String,
-    pub action: String, // "install" | "update" | "rollback"
+    pub action: String, // "install" | "update" | "rollback" | "remove"
     pub from: Option<String>,
     pub to: String,
 }
@@ -253,6 +253,24 @@ mod tests {
         assert_eq!(h.len(), 2);
         assert_eq!(h[0].pkg, "b"); // newest first
         assert_eq!(h[1].pkg, "a");
+    }
+
+    #[test]
+    fn remove_history_entry_round_trips_with_empty_to() {
+        let s = temp_store();
+        s.add_history(HistoryEntry {
+            ts: 1,
+            pkg: "cowsay".into(),
+            eco: "npm".into(),
+            action: "remove".into(),
+            from: Some("1.6.0".into()),
+            to: String::new(),
+        });
+        let h = s.history();
+        assert_eq!(h.len(), 1);
+        assert_eq!(h[0].action, "remove");
+        assert_eq!(h[0].to, "");
+        assert_eq!(h[0].from, Some("1.6.0".into()));
     }
 
     #[test]
