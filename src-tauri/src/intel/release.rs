@@ -203,28 +203,22 @@ pub fn release_verdict(
     now: i64,
     cache_dir: &Path,
 ) -> (String, String, String) {
-    let (doc_url, published) = match eco {
-        "npm" | "npx" => {
-            let url = format!("https://registry.npmjs.org/{}", crate::http::encode(pkg));
-            let body = crate::http::get(&url).ok();
-            let published = body.as_deref().and_then(|b| parse_npm_time(b, version));
-            (body, published)
-        }
-        "pip" => {
-            let url = format!("https://pypi.org/pypi/{}/json", crate::http::encode(pkg));
-            let body = crate::http::get(&url).ok();
-            let published = body.as_deref().and_then(|b| parse_pypi_time(b, version));
-            (body, published)
-        }
-        _ => (None, None),
+    let doc = match eco {
+        "npm" | "npx" | "pip" => super::registry::doc(eco, pkg, cache_dir),
+        _ => None,
     };
+    let published = doc.as_deref().and_then(|b| match eco {
+        "npm" | "npx" => parse_npm_time(b, version),
+        "pip" => parse_pypi_time(b, version),
+        _ => None,
+    });
     let (rec, age_label) = age_verdict(published, now);
     if rec != "new" {
         return (rec, age_label, String::new());
     }
     // Fresh: try to upgrade to "hold" from issue velocity. Any miss stays "new".
     let upgraded = (|| {
-        let body = doc_url.as_deref()?;
+        let body = doc.as_deref()?;
         let repo_url = repo_url_from_doc(eco, body)?;
         let (owner, repo) = github_repo_from_url(&repo_url)?;
         velocity_verdict(eco, pkg, version, &owner, &repo, published?, now, cache_dir)
@@ -348,36 +342,12 @@ pub fn changelog(eco: &str, pkg: &str, version: &str, cache_dir: &Path) -> Vec<S
         }
     }
 
-    // Derive the GitHub repo URL from the registry.
+    // Derive the GitHub repo URL from the registry (npm/pip go through the
+    // shared registry-document cache since release_verdict already fetched
+    // the same document once per TTL window).
     let repo_url: Option<String> = match eco {
-        "npm" | "npx" => {
-            let url = format!("https://registry.npmjs.org/{}", crate::http::encode(pkg));
-            crate::http::get(&url).ok().and_then(|body| {
-                let v: Value = serde_json::from_str(&body).ok()?;
-                v.get("repository")?.get("url")?.as_str().map(String::from)
-            })
-        }
-        "pip" => {
-            let url = format!("https://pypi.org/pypi/{}/json", crate::http::encode(pkg));
-            crate::http::get(&url).ok().and_then(|body| {
-                let v: Value = serde_json::from_str(&body).ok()?;
-                let info = v.get("info")?;
-                // Check project_urls values first.
-                if let Some(urls) = info.get("project_urls").and_then(|u| u.as_object()) {
-                    for (_, val) in urls {
-                        if let Some(s) = val.as_str() {
-                            if s.contains("github.com") {
-                                return Some(s.to_string());
-                            }
-                        }
-                    }
-                }
-                // Fall back to home_page.
-                info.get("home_page")
-                    .and_then(|h| h.as_str())
-                    .filter(|s| s.contains("github.com"))
-                    .map(String::from)
-            })
+        "npm" | "npx" | "pip" => {
+            super::registry::doc(eco, pkg, cache_dir).and_then(|body| repo_url_from_doc(eco, &body))
         }
         "brew" => {
             let url = format!(

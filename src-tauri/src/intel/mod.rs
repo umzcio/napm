@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 pub mod osv;
+pub mod registry;
 pub mod release;
 pub mod wire;
 
