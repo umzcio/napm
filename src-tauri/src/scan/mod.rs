@@ -9,6 +9,7 @@ pub mod npx;
 pub mod pip;
 pub mod publisher;
 pub mod size;
+pub mod version;
 
 /// One row in the Shared Library. Mirrors the prototype's tool shape.
 #[derive(Debug, Clone, PartialEq, Serialize)]
