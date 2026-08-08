@@ -312,12 +312,18 @@
   // Populated by live calls to search_registry; empty until a search runs.
   var SWARM = [];
   var searchSource = "all";
+  // Bumped on every runSearch() call; a stale response whose seq no longer
+  // matches is dropped instead of overwriting a later search's results.
+  var searchSeq = 0;
 
   var FEED=[];
   var WIRE=[];
   var SECURITY_OK=true;
   var WIRE_OK=true;
-  var LOADING_FEED=false;
+  // Bumped on every loadWhatsNew() call; a stale response whose gen no longer
+  // matches is dropped instead of clobbering a reload triggered while it was
+  // still in flight (e.g. a rescan).
+  var feedGen=0;
   var FEED_LOADED=false;
   var REC={
     malicious:["☠ Compromised: act now","malicious"],
@@ -437,13 +443,16 @@
   var resEl=document.getElementById("searchResults");
   function runSearch(q){
     lastQuery=q; switchTab("search");
+    var seq=++searchSeq;
     if(!q){ resEl.innerHTML='<div class="empty">Search the swarm for a package to download.<span class="hint">Try: <b>linter</b>, <b>http</b>, <b>fuzzy</b>, <b>claude</b>, <b>ripgrep</b></span></div>'; return; }
     resEl.innerHTML='<div class="searching">Searching the swarm for "'+esc(q)+'" ...</div>';
     if(!inv()){ resEl.innerHTML='<div class="empty">The swarm is unreachable. Check your connection and try again.</div>'; return; }
     call("search_registry",{query:q}).then(function(results){
+      if(seq!==searchSeq) return;
       SWARM = results || [];
       renderSearchResults();
     }).catch(function(){
+      if(seq!==searchSeq) return;
       resEl.innerHTML='<div class="empty">The swarm is unreachable. Check your connection and try again.</div>';
     });
   }
@@ -529,13 +538,13 @@
   }
   function loadWhatsNew(){
     if(!inv()){ FEED=[]; WIRE=[]; SECURITY_OK=false; WIRE_OK=false; renderFeed(); return; }
-    if(LOADING_FEED) return;
-    LOADING_FEED=true;
+    var gen=++feedGen;
     document.getElementById("feed").innerHTML='<div class="searching">Checking the swarm for advisories…</div>';
     var installed=TOOLS.filter(function(t){return t.installed && t.eco!=="manual";}).map(function(t){
       return {pkg:t.pkg, eco:t.eco, installed:t.installed, latest:t.latest};
     });
     call("get_whats_new",{installed:installed, verdictScope:verdictScope()}).then(function(r){
+      if(gen!==feedGen) return;
       r=r||{};
       SECURITY_OK = r.securityOk!==false;
       WIRE_OK = r.wireOk!==false;
@@ -557,9 +566,12 @@
           age:v.ageLabel||"signal unknown", blurb:reBlurb(v), changelog:[], loaded:false,
           signals:[], fix:null, link:""});
       });
-      LOADING_FEED=false; FEED_LOADED=true;
+      FEED_LOADED=true;
       FEED=feed; renderFeed(); renderStatus();
-    }).catch(function(){ LOADING_FEED=false; FEED=[]; WIRE=[]; SECURITY_OK=false; WIRE_OK=false; renderFeed(); });
+    }).catch(function(){
+      if(gen!==feedGen) return;
+      FEED=[]; WIRE=[]; SECURITY_OK=false; WIRE_OK=false; renderFeed();
+    });
   }
   function reBlurb(v){
     if(v.recommendation==="safe") return "Settled release, no advisories. Safe to take.";
@@ -940,6 +952,8 @@
       }
       renderXfers(); renderRows();
       FEED_LOADED=false;
+      var activeView=document.querySelector(".view.active");
+      if(activeView && activeView.dataset.view==="whatsnew") loadWhatsNew();
       loadHistory();
     });
   })();
