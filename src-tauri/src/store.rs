@@ -58,6 +58,19 @@ pub struct Store {
 impl Store {
     pub fn new(dir: PathBuf) -> Store {
         let _ = std::fs::create_dir_all(&dir);
+        // Best-effort: tighten the mode on a pre-existing settings.json so
+        // upgrading users get the owner-only fix without re-saving.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let settings_path = dir.join("settings.json");
+            if settings_path.exists() {
+                let _ = std::fs::set_permissions(
+                    &settings_path,
+                    std::fs::Permissions::from_mode(0o600),
+                );
+            }
+        }
         Store { dir }
     }
 
@@ -82,6 +95,11 @@ impl Store {
         if let Ok(s) = serde_json::to_string_pretty(value) {
             let tmp = path.with_extension("json.tmp");
             if std::fs::write(&tmp, s).is_ok() {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+                }
                 let _ = std::fs::rename(&tmp, path);
             }
         }
@@ -281,6 +299,44 @@ mod tests {
         assert_eq!(got.github_token, "abc");
         assert!(!got.sources.brew);
         assert!(got.sources.npm && got.sources.pip);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn settings_file_is_owner_only_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let s = temp_store();
+        s.set_settings(&Settings {
+            github_token: "secret-token".into(),
+            sources: Sources::default(),
+        });
+        let perm = std::fs::metadata(s.dir_for_test().join("settings.json"))
+            .unwrap()
+            .permissions();
+        assert_eq!(perm.mode() & 0o777, 0o600);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn preexisting_settings_file_is_remoded_on_store_new() {
+        use std::os::unix::fs::PermissionsExt;
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("napm-test-remode-{:p}", &dir));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("settings.json"), b"{}").unwrap();
+        std::fs::set_permissions(
+            dir.join("settings.json"),
+            std::fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+
+        let _s = Store::new(dir.clone());
+
+        let perm = std::fs::metadata(dir.join("settings.json"))
+            .unwrap()
+            .permissions();
+        assert_eq!(perm.mode() & 0o777, 0o600);
     }
 
     #[test]
