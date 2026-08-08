@@ -162,16 +162,44 @@ struct NpxLatest {
 /// For each npx package name, resolve the registry `dist-tags.latest` (the
 /// version npx fetches on the next `@latest` run). Best-effort: unresolved
 /// packages are omitted. Used by the frontend to show a drift hint on npx rows.
+/// Goes through the shared registry-document cache and is bounded at 8
+/// concurrent workers rather than one thread per package.
 #[tauri::command(async)]
-fn npx_latest(pkgs: Vec<String>) -> Vec<NpxLatest> {
-    pkgs.into_iter()
-        .filter_map(|pkg| {
-            let url = format!("https://registry.npmjs.org/{}", http::encode(&pkg));
-            let body = http::get(&url).ok()?;
-            let latest = scan::npx::parse_dist_tag_latest(&body)?;
-            Some(NpxLatest { pkg, latest })
-        })
-        .collect()
+fn npx_latest(app: tauri::AppHandle, pkgs: Vec<String>) -> Vec<NpxLatest> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let _ = std::fs::create_dir_all(&dir);
+
+    let mut results: Vec<Option<NpxLatest>> = (0..pkgs.len()).map(|_| None).collect();
+    std::thread::scope(|inner| {
+        let handles: Vec<_> = intel::registry::chunk_indices(pkgs.len(), 8)
+            .into_iter()
+            .map(|idxs| {
+                let pkgs = &pkgs;
+                let dir = &dir;
+                inner.spawn(move || -> Vec<(usize, NpxLatest)> {
+                    idxs.into_iter()
+                        .filter_map(|i| {
+                            let pkg = pkgs[i].clone();
+                            let body = intel::registry::doc("npm", &pkg, dir)?;
+                            let latest = scan::npx::parse_dist_tag_latest(&body)?;
+                            Some((i, NpxLatest { pkg, latest }))
+                        })
+                        .collect()
+                })
+            })
+            .collect();
+        for h in handles {
+            if let Ok(pairs) = h.join() {
+                for (i, info) in pairs {
+                    results[i] = Some(info);
+                }
+            }
+        }
+    });
+    results.into_iter().flatten().collect()
 }
 
 /// Reveal and select a path in Finder (`open -R`). Validates the path exists so
