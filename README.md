@@ -143,7 +143,7 @@ And the dial-up splash on launch, covering the first real scan:
 
 ## Architecture
 
-Two layers. A native Rust backend owns every shell call and all version logic and is the single source of truth. A vanilla-JS frontend is the Win98 UI and only ever calls `invoke()`.
+Two layers. A native Rust backend owns every shell call, version comparison, and status classification, and is the single source of truth. A vanilla-JS frontend is the Win98 UI and only ever calls `invoke()`; the frontend's only version-adjacent logic is the appetite dial's safe/held mapping over the backend-computed bump kind.
 
 ```
               +-----------------------------------+
@@ -246,7 +246,7 @@ napm/
 
 **Why a 90s file-sharing skin?** Nostalgia, honestly. I wanted to recreate that late-90s peer-to-peer feel. It also turns out to be a near-perfect metaphor: a P2P client is a list of files, who has them, which copies are newer, and a queue of transfers. Swap "files" for "CLI tools" and you have a package manager. So the look is genuine homage, and every element that reads as flavor still carries real data underneath.
 
-**Why Tauri and native Rust?** napm needs privileged shell access to run npm, brew, and pip, which rules out a pure browser app. Tauri gives a tiny single-binary native window, and keeping every shell call and all version logic in Rust means there is exactly one source of truth and the frontend can never shell out.
+**Why Tauri and native Rust?** napm needs privileged shell access to run npm, brew, and pip, which rules out a pure browser app. Tauri gives a tiny single-binary native window, and keeping every shell call, version comparison, and status classification in Rust means there is exactly one source of truth and the frontend can never shell out.
 
 **Why capture the login-shell PATH at startup?** A GUI app launched from the Dock does not inherit your shell PATH, it gets a bare `/usr/bin:/bin:/usr/sbin:/sbin`. Without capturing the real PATH first, a packaged napm would find none of your tools. It runs your login shell once at startup, reads its PATH, and sets it before anything spawns.
 
