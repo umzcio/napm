@@ -324,15 +324,11 @@
     "new":["○ New, little signal yet","new"],
     unknown:["○ no release signal","new"]
   };
-  var HANDLES=["npstr_user_2001","l33t_w4rez","fast_pipe_99","t0tally_legit","dialup_dan","cd_burner","kazaa_refugee"];
-
   // Status is computed in Rust (scan::version::status_of, which handles the
   // "update only when latest is genuinely newer" and downgrade logic) and
   // shipped on every tool as t.status; this just reads it so call sites do
   // not change.
   function statusOf(t){ return t.status; }
-  function ping(n){ var h=0; for(var i=0;i<n.length;i++) h=(h*31+n.charCodeAt(i))>>>0; return 8+(h%320); }
-  function handleFor(n){ var h=0; for(var i=0;i<n.length;i++) h=(h*31+n.charCodeAt(i))>>>0; return HANDLES[h%HANDLES.length]; }
   function fmtDl(n){ if(n>=1e6) return (n/1e6).toFixed(n>=1e7?0:1).replace(/\.0$/,"")+"M"; if(n>=1e3) return Math.round(n/1e3)+"K"; return ""+n; }
   function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
   // Tagged template: every ${} interpolation is HTML-escaped. Interpolate
@@ -435,9 +431,8 @@
     lastQuery=q; switchTab("search");
     if(!q){ resEl.innerHTML='<div class="empty">Search the swarm for a package to download.<span class="hint">Try: <b>linter</b>, <b>http</b>, <b>fuzzy</b>, <b>claude</b>, <b>ripgrep</b></span></div>'; return; }
     resEl.innerHTML='<div class="searching">Searching the swarm for "'+esc(q)+'" ...</div>';
-    var inv=window.__TAURI__&&window.__TAURI__.core&&window.__TAURI__.core.invoke;
-    if(!inv){ resEl.innerHTML='<div class="empty">The swarm is unreachable. Check your connection and try again.</div>'; return; }
-    inv("search_registry",{query:q}).then(function(results){
+    if(!inv()){ resEl.innerHTML='<div class="empty">The swarm is unreachable. Check your connection and try again.</div>'; return; }
+    call("search_registry",{query:q}).then(function(results){
       SWARM = results || [];
       renderSearchResults();
     }).catch(function(){
@@ -525,15 +520,14 @@
     }).map(function(t){ return t.pkg; });
   }
   function loadWhatsNew(){
-    var inv=window.__TAURI__&&window.__TAURI__.core&&window.__TAURI__.core.invoke;
-    if(!inv){ FEED=[]; WIRE=[]; SECURITY_OK=false; WIRE_OK=false; renderFeed(); return; }
+    if(!inv()){ FEED=[]; WIRE=[]; SECURITY_OK=false; WIRE_OK=false; renderFeed(); return; }
     if(LOADING_FEED) return;
     LOADING_FEED=true;
     document.getElementById("feed").innerHTML='<div class="searching">Checking the swarm for advisories…</div>';
     var installed=TOOLS.filter(function(t){return t.installed && t.eco!=="manual";}).map(function(t){
       return {pkg:t.pkg, eco:t.eco, installed:t.installed, latest:t.latest};
     });
-    inv("get_whats_new",{installed:installed, verdictScope:verdictScope()}).then(function(r){
+    call("get_whats_new",{installed:installed, verdictScope:verdictScope()}).then(function(r){
       r=r||{};
       SECURITY_OK = r.securityOk!==false;
       WIRE_OK = r.wireOk!==false;
@@ -563,7 +557,6 @@
     if(v.recommendation==="safe") return "Settled release, no advisories. Safe to take.";
     if(v.recommendation==="hold") return v.reason ? ("Fresh release: "+v.reason+". Consider waiting.") : "Fresh release showing elevated issue activity. Consider waiting.";
     if(v.recommendation==="new") return "Fresh release with little signal yet. Your call.";
-    if(v.recommendation==="unknown") return "No release-age signal available for this source.";
     return "No release-age signal available for this source.";
   }
   function findToolIdx(pkg, eco){ for(var i=0;i<TOOLS.length;i++) if(TOOLS[i].pkg===pkg && TOOLS[i].eco===eco) return i; return -1; }
@@ -656,11 +649,10 @@
       if(it) it.open=isOpen; // persist across the re-render after a lazy changelog load
       if(isOpen && it && !it.loaded){
         it.loaded=true;
-        var inv=window.__TAURI__&&window.__TAURI__.core&&window.__TAURI__.core.invoke;
-        if(inv){
+        if(inv()){
           if(it.id && !it.detailLoaded){
             // alert card: lazy-load the advisory detail (summary + fixed version)
-            inv("get_advisory",{id:it.id}).then(function(d){
+            call("get_advisory",{id:it.id}).then(function(d){
               it.detailLoaded=true;
               if(d){ if(d.summary) it.blurb=d.summary; if(d.fixedVersion) it.fix=d.fixedVersion; }
               renderFeed();
@@ -668,7 +660,7 @@
           } else if(!it.id){
             // verdict card: lazy-load the changelog
             var ver=it.fix||(it.ti>=0?TOOLS[it.ti].latest:it.pkg);
-            inv("get_changelog",{eco:it.eco,pkg:it.pkg,version:ver}).then(function(log){ it.changelog=log||[]; renderFeed(); }).catch(function(){ renderFeed(); });
+            call("get_changelog",{eco:it.eco,pkg:it.pkg,version:ver}).then(function(log){ it.changelog=log||[]; renderFeed(); }).catch(function(){ renderFeed(); });
           }
         }
       }
@@ -755,9 +747,11 @@
     var x={opId:opId,eco:t.eco,pkg:t.pkg,name:t.name,user:t.publisher||"unknown",cmd:cmd,lines:[],done:false,ok:false,
            action:action,from:from,to:target};
     xfers.unshift(x); renderXfers();
-    var inv=window.__TAURI__&&window.__TAURI__.core&&window.__TAURI__.core.invoke;
-    if(!inv){ x.done=true; x.ok=false; x.lines.push({stream:"stderr",line:"(not running in napm)"}); renderXfers(); return; }
-    inv("run_op",{opId:opId,eco:t.eco,pkg:t.pkg,from:from,to:target,action:action});
+    var iv=inv();
+    if(!iv){ x.done=true; x.ok=false; x.lines.push({stream:"stderr",line:"(not running in napm)"}); renderXfers(); return; }
+    // run_op has its own event-driven feedback (transfer-line/transfer-done),
+    // so this stays a raw fire-and-forget invoke rather than call().
+    iv("run_op",{opId:opId,eco:t.eco,pkg:t.pkg,from:from,to:target,action:action});
   }
 
   function xferMenu(xi, x, y){
@@ -868,9 +862,8 @@
   var DID_UPDATE_CHECK=false;
   var NPX_DRIFT={}; // npx pkg -> registry latest, only when it differs from the cached version
   function scanLibrary(){
-    var inv = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
-    if(!inv){ renderRows(); FEED_LOADED=false; loadWhatsNew(); renderStatus(); dismissSplash(); return; }
-    inv("scan_installed").then(function(tools){
+    if(!inv()){ renderRows(); FEED_LOADED=false; loadWhatsNew(); renderStatus(); dismissSplash(); return; }
+    call("scan_installed").then(function(tools){
       TOOLS = tools || [];
       selected=null; // the old index no longer maps into the rebuilt list
       renderRows(); annotateNpxDrift(); FEED_LOADED=false; loadWhatsNew(); renderStatus(); dismissSplash();
@@ -933,6 +926,34 @@
   // app bridge is absent, so the version simply stays blank.
   // ---- MENU BAR ----------------------------------------------------------
   function inv(){ return window.__TAURI__&&window.__TAURI__.core&&window.__TAURI__.core.invoke; }
+  // The one seam every backend call goes through: it surfaces a rejection in
+  // the status bar (so a failed check is never silently indistinguishable
+  // from an all-clear) and still rejects, so callers that need to react
+  // (revert an optimistic update, set a failure flag) can chain a .catch or
+  // pass onErr.
+  function summarizeErr(e){
+    if(e==null) return "unknown error";
+    if(typeof e==="string") return e;
+    if(e.message) return e.message;
+    try{ return JSON.stringify(e); }catch(err){ return String(e); }
+  }
+  var flashTimer=null;
+  function flashStatus(msg){
+    var el=document.getElementById("sbState");
+    if(!el) return;
+    if(flashTimer){ clearTimeout(flashTimer); }
+    el.textContent=msg;
+    flashTimer=setTimeout(function(){ flashTimer=null; renderStatus(); }, 6000);
+  }
+  function call(cmd, args, onErr){
+    var i=inv();
+    if(!i) return Promise.reject(new Error("not running in napm"));
+    return i(cmd, args).catch(function(e){
+      flashStatus(cmd+" failed: "+summarizeErr(e));
+      if(onErr) onErr(e);
+      throw e;
+    });
+  }
   function copyText(s){
     if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(s).catch(function(){fallbackCopy(s);}); }
     else fallbackCopy(s);
