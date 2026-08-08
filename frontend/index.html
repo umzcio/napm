@@ -588,7 +588,8 @@
         var pubHtml = w.published ? h`<span class="wire-date">${w.published.slice(0,10)}</span>` : '';
         return h`<div class="wire-item"><span class="src ${w.eco}">${w.eco}</span> ${w.summary||w.id}${raw(pubHtml)}</div>`;
       }).join("");
-      f.innerHTML+=h`<div class="wire"><div class="wire-h">\ud83d\udce1 supply-chain wire</div>${raw(items)}</div>`;
+      var partialHtml = WIRE_OK ? '' : h`<div class="wire-item muted">wire incomplete: one source could not be reached, showing what is known</div>`;
+      f.innerHTML+=h`<div class="wire"><div class="wire-h">\ud83d\udce1 supply-chain wire</div>${raw(items)}${raw(partialHtml)}</div>`;
     } else if(!WIRE_OK){
       f.innerHTML+='<div class="wire"><div class="wire-h">\ud83d\udce1 supply-chain wire</div><div class="wire-item muted">wire unavailable</div></div>';
     }
