@@ -23,6 +23,10 @@ fn valid_pkg(eco: &str, pkg: &str) -> bool {
             }
             None => !pkg.contains('/'),
         },
+        // cargo: crate name grammar is [A-Za-z0-9_-] only, no '/', '@', or '.'.
+        "cargo" => pkg
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'),
         // pip and brew (and anything else): no path segments. '@' is left
         // unrestricted so brew formulae like "gcc@13" still validate.
         _ => !pkg.contains('/'),
@@ -118,6 +122,23 @@ pub fn build_command(
             vec![
                 "i".to_string(),
                 "-g".to_string(),
+                "--".to_string(),
+                pkg.to_string(),
+            ],
+        )),
+        // cargo, unlike brew, genuinely supports installing an arbitrary prior
+        // version, so rollback (and install/update) all reduce to the same
+        // `cargo install --version <v> -- <pkg>` invocation.
+        ("cargo", "remove") => Some((
+            "cargo".to_string(),
+            vec!["uninstall".to_string(), "--".to_string(), pkg.to_string()],
+        )),
+        ("cargo", _) => Some((
+            "cargo".to_string(),
+            vec![
+                "install".to_string(),
+                "--version".to_string(),
+                version.to_string(),
                 "--".to_string(),
                 pkg.to_string(),
             ],
@@ -496,6 +517,50 @@ mod tests {
     #[test]
     fn brew_rollback_is_unsupported() {
         assert!(build_command("brew", "ripgrep", "14.0.0", "rollback", "pip3").is_none());
+    }
+
+    #[test]
+    fn cargo_rollback_is_supported_unlike_brew() {
+        // Contrast with brew_rollback_is_unsupported above: cargo genuinely
+        // supports installing an arbitrary prior version, so rollback must
+        // NOT be None the way brew's is.
+        let built = build_command("cargo", "ripgrep", "14.0.0", "rollback", "pip3");
+        assert!(built.is_some());
+        let (prog, args) = built.unwrap();
+        assert_eq!(prog, "cargo");
+        assert_eq!(
+            args,
+            vec!["install", "--version", "14.0.0", "--", "ripgrep"]
+        );
+    }
+
+    #[test]
+    fn cargo_install_and_update_pin_version() {
+        let (prog, args) = build_command("cargo", "ripgrep", "14.1.1", "install", "pip3").unwrap();
+        assert_eq!(prog, "cargo");
+        assert_eq!(
+            args,
+            vec!["install", "--version", "14.1.1", "--", "ripgrep"]
+        );
+        let (prog2, args2) = build_command("cargo", "ripgrep", "14.1.1", "update", "pip3").unwrap();
+        assert_eq!(prog2, "cargo");
+        assert_eq!(args2, args);
+    }
+
+    #[test]
+    fn cargo_remove_builds_uninstall() {
+        let (prog, args) = build_command("cargo", "ripgrep", "", "remove", "pip3").unwrap();
+        assert_eq!(prog, "cargo");
+        assert_eq!(args, vec!["uninstall", "--", "ripgrep"]);
+    }
+
+    #[test]
+    fn cargo_package_name_rejects_slash_dot_and_at() {
+        assert!(build_command("cargo", "evil/pkg", "1.0.0", "update", "pip3").is_none());
+        assert!(build_command("cargo", "evil.pkg", "1.0.0", "update", "pip3").is_none());
+        assert!(build_command("cargo", "evil@pkg", "1.0.0", "update", "pip3").is_none());
+        // valid crate-name grammar: alphanumeric, '_' and '-' only
+        assert!(build_command("cargo", "cargo-edit", "0.12.2", "update", "pip3").is_some());
     }
 
     #[test]
