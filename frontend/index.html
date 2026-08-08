@@ -423,7 +423,6 @@
         h`<td class="muted">${raw(ago(t.updated))}</td>`+
         h`<td>${raw(pinCell)}</td>`+
         h`<td>${raw(action)}</td>`;
-      tr.addEventListener("click",function(){selected=i; renderRows();});
       rowsEl.appendChild(tr);
     });
     renderStatus();
@@ -822,6 +821,8 @@
     if(p){ e.stopPropagation(); togglePin(+p.dataset.pin); return; }
     var b=e.target.closest("[data-get]");
     if(b){ e.stopPropagation(); var j=+b.dataset.get; queueTransfer(TOOLS[j],TOOLS[j].latest,TOOLS[j].installed?"update":"install"); switchTab("transfers"); }
+    var tr=e.target.closest("tr[data-i]");
+    if(tr){ var i=+tr.dataset.i; if(selected!==i){ var prev=rowsEl.querySelector("tr.sel"); if(prev) prev.classList.remove("sel"); selected=i; tr.classList.add("sel"); } }
   });
   function libMenu(i, x, y){
     var t=TOOLS[i]; if(!t) return;
