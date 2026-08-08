@@ -58,11 +58,45 @@ pub fn parse_advisories(json: &str, eco: &str) -> Vec<WireItem> {
         .collect()
 }
 
+/// Merge per-source fetch results with the cached items. For a source that
+/// failed, fall back to that source's items from `cached`. `complete` is true
+/// only when both fetches succeeded. Result is sorted by published descending
+/// and capped to 15 items.
+fn merge_wire(
+    npm: Option<Vec<WireItem>>,
+    pip: Option<Vec<WireItem>>,
+    cached: &[WireItem],
+) -> (Vec<WireItem>, bool) {
+    let complete = npm.is_some() && pip.is_some();
+
+    let mut merged: Vec<WireItem> = Vec::new();
+    match npm {
+        Some(items) => merged.extend(items),
+        None => merged.extend(cached.iter().filter(|w| w.eco == "npm").cloned()),
+    }
+    match pip {
+        Some(items) => merged.extend(items),
+        None => merged.extend(cached.iter().filter(|w| w.eco == "pip").cloned()),
+    }
+
+    // Sort by published descending (ISO timestamps sort correctly as strings).
+    // Items with an empty published string sort LAST (treat "" as oldest).
+    merged.sort_by(|a, b| {
+        let key = |w: &WireItem| (!w.published.is_empty(), w.published.clone());
+        key(b).cmp(&key(a))
+    });
+    merged.truncate(15);
+
+    (merged, complete)
+}
+
 /// Fetch npm and pip malware advisories from GitHub, merge (npm first), sort by
 /// published descending, cap to 15, and cache as wire.json in cache_dir with a
 /// 1h freshness window. Returns None only if both fetches fail and no stale cache
-/// exists.
-pub fn fetch_wire(cache_dir: &Path) -> Option<Vec<WireItem>> {
+/// exists. The returned bool is `complete`: true only when both sources were
+/// fetched fresh this call. A partial result (complete == false) is never
+/// written to the cache, so a stale source can still backfill next time.
+pub fn fetch_wire(cache_dir: &Path) -> Option<(Vec<WireItem>, bool)> {
     let cache_path = cache_dir.join("wire.json");
 
     // Check freshness: under 1h is a live hit.
@@ -80,10 +114,16 @@ pub fn fetch_wire(cache_dir: &Path) -> Option<Vec<WireItem>> {
     if fresh {
         if let Ok(text) = std::fs::read_to_string(&cache_path) {
             if let Ok(items) = serde_json::from_str::<Vec<WireItem>>(&text) {
-                return Some(items);
+                return Some((items, true));
             }
         }
     }
+
+    // Whatever is on disk, fresh or stale, backfills a source whose fetch fails.
+    let cached: Vec<WireItem> = std::fs::read_to_string(&cache_path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<Vec<WireItem>>(&t).ok())
+        .unwrap_or_default();
 
     // Stale or missing: attempt fresh fetches.
     let npm_url =
@@ -104,39 +144,29 @@ pub fn fetch_wire(cache_dir: &Path) -> Option<Vec<WireItem>> {
     let npm_result = crate::http::get_with_headers(npm_url, &base_headers);
     let pip_result = crate::http::get_with_headers(pip_url, &base_headers);
 
-    let npm_ok = npm_result.is_ok();
-    let pip_ok = pip_result.is_ok();
-
-    if !npm_ok && !pip_ok {
+    if npm_result.is_err() && pip_result.is_err() {
         // Both failed: return stale cache if available, else None.
-        return std::fs::read_to_string(&cache_path)
-            .ok()
-            .and_then(|t| serde_json::from_str::<Vec<WireItem>>(&t).ok());
+        return if cached.is_empty() {
+            None
+        } else {
+            Some((cached, false))
+        };
     }
 
-    let mut merged: Vec<WireItem> = Vec::new();
+    let npm_items = npm_result.ok().map(|body| parse_advisories(&body, "npm"));
+    let pip_items = pip_result.ok().map(|body| parse_advisories(&body, "pip"));
 
-    if let Ok(body) = npm_result {
-        merged.extend(parse_advisories(&body, "npm"));
-    }
-    if let Ok(body) = pip_result {
-        merged.extend(parse_advisories(&body, "pip"));
-    }
+    let (merged, complete) = merge_wire(npm_items, pip_items, &cached);
 
-    // Sort by published descending (ISO timestamps sort correctly as strings).
-    // Items with an empty published string sort LAST (treat "" as oldest).
-    merged.sort_by(|a, b| {
-        let key = |w: &WireItem| (!w.published.is_empty(), w.published.clone());
-        key(b).cmp(&key(a))
-    });
-    merged.truncate(15);
-
-    // Cache the merged vec.
-    if let Ok(text) = serde_json::to_string(&merged) {
-        let _ = std::fs::write(&cache_path, &text);
+    // A partial result must not poison the cache: only a complete fetch is
+    // written, so the stale cache remains available to backfill next time.
+    if complete {
+        if let Ok(text) = serde_json::to_string(&merged) {
+            let _ = std::fs::write(&cache_path, &text);
+        }
     }
 
-    Some(merged)
+    Some((merged, complete))
 }
 
 #[cfg(test)]
@@ -160,5 +190,100 @@ mod tests {
     #[test]
     fn garbage_is_empty() {
         assert!(parse_advisories("nope", "npm").is_empty());
+    }
+
+    fn item(id: &str, eco: &str, published: &str) -> WireItem {
+        WireItem {
+            id: id.to_string(),
+            eco: eco.to_string(),
+            summary: format!("summary for {id}"),
+            packages: Vec::new(),
+            published: published.to_string(),
+            link: String::new(),
+        }
+    }
+
+    #[test]
+    fn merge_wire_both_fresh_is_complete() {
+        let npm = vec![item("GHSA-npm-1", "npm", "2026-01-02T00:00:00Z")];
+        let pip = vec![item("GHSA-pip-1", "pip", "2026-01-01T00:00:00Z")];
+        let (merged, complete) = merge_wire(Some(npm), Some(pip), &[]);
+        assert!(complete);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].id, "GHSA-npm-1");
+        assert_eq!(merged[1].id, "GHSA-pip-1");
+    }
+
+    #[test]
+    fn merge_wire_npm_failed_falls_back_to_cached_npm() {
+        let cached = vec![
+            item("GHSA-npm-old", "npm", "2025-12-01T00:00:00Z"),
+            item("GHSA-pip-old", "pip", "2025-11-01T00:00:00Z"),
+        ];
+        let pip = vec![item("GHSA-pip-new", "pip", "2026-01-01T00:00:00Z")];
+        let (merged, complete) = merge_wire(None, Some(pip), &cached);
+        assert!(!complete);
+        let ids: Vec<&str> = merged.iter().map(|w| w.id.as_str()).collect();
+        assert!(ids.contains(&"GHSA-npm-old"));
+        assert!(ids.contains(&"GHSA-pip-new"));
+        assert!(!ids.contains(&"GHSA-pip-old"));
+        assert_eq!(merged.len(), 2);
+    }
+
+    #[test]
+    fn merge_wire_npm_failed_empty_cache_is_pip_only() {
+        let pip = vec![item("GHSA-pip-new", "pip", "2026-01-01T00:00:00Z")];
+        let (merged, complete) = merge_wire(None, Some(pip), &[]);
+        assert!(!complete);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].id, "GHSA-pip-new");
+    }
+
+    #[test]
+    fn merge_wire_both_failed_falls_back_to_cache_entirely() {
+        let cached = vec![
+            item("GHSA-npm-old", "npm", "2025-12-01T00:00:00Z"),
+            item("GHSA-pip-old", "pip", "2025-11-01T00:00:00Z"),
+        ];
+        let (merged, complete) = merge_wire(None, None, &cached);
+        assert!(!complete);
+        assert_eq!(merged.len(), 2);
+    }
+
+    #[test]
+    fn merge_wire_sorts_desc_and_truncates_to_15() {
+        // npm items are all older (2025) than pip items (2026), and there are
+        // more pip items than the 15-item cap, so the truncated result should
+        // be entirely pip, newest first.
+        let npm: Vec<WireItem> = (0..5)
+            .map(|i| {
+                item(
+                    &format!("GHSA-npm-{i}"),
+                    "npm",
+                    &format!("2025-01-{:02}T00:00:00Z", i + 1),
+                )
+            })
+            .collect();
+        let pip: Vec<WireItem> = (0..20)
+            .map(|i| {
+                item(
+                    &format!("GHSA-pip-{i}"),
+                    "pip",
+                    &format!("2026-02-{:02}T00:00:00Z", i + 1),
+                )
+            })
+            .collect();
+        let (merged, complete) = merge_wire(Some(npm), Some(pip), &[]);
+        assert!(complete);
+        assert_eq!(merged.len(), 15);
+        // Descending order: the newest pip item (day 20) sorts first.
+        assert_eq!(merged[0].id, "GHSA-pip-19");
+        for w in &merged {
+            assert!(
+                w.eco == "pip",
+                "expected all top-15 to be pip items, got {}",
+                w.eco
+            );
+        }
     }
 }

@@ -161,7 +161,7 @@ pub fn whats_new(
         verdicts.retain(|v| !flagged.contains(&(v.eco.as_str(), v.pkg.as_str())));
 
         let (wire, wire_ok) = match wir {
-            Some(w) => (w, true),
+            Some((w, complete)) => (w, complete),
             None => (Vec::new(), false),
         };
         WhatsNew {
