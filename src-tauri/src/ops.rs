@@ -110,6 +110,52 @@ use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter};
 
+/// Read a child pipe to EOF, emitting one event per line. Bytes are decoded
+/// lossily (invalid UTF-8 -> U+FFFD) so a stray byte never truncates the
+/// stream the way `BufRead::lines()` used to (it returns Err on invalid
+/// UTF-8, and the reader threads used to filter-and-stop on that Err via
+/// `map_while`, dropping the rest of the output).
+/// Splits on \n and also treats \r as a line break so progress-bar rewrites
+/// arrive as lines instead of one giant blob. A single \n-delimited read
+/// that contains far more \r pieces than a human could ever see distinctly
+/// (a progress bar rewriting itself hundreds of times inside one buffered
+/// read) is coalesced to just its last piece, so a chatty progress bar
+/// cannot flood the UI with hundreds of line events for what is visually
+/// one line.
+fn stream_lines<R: std::io::Read>(pipe: R, mut emit: impl FnMut(String)) {
+    const CR_COALESCE_THRESHOLD: usize = 32;
+
+    let mut reader = BufReader::new(pipe);
+    let mut buf: Vec<u8> = Vec::new();
+    loop {
+        buf.clear();
+        let n = match reader.read_until(b'\n', &mut buf) {
+            Ok(n) => n,
+            Err(_) => break,
+        };
+        if n == 0 {
+            break;
+        }
+        if buf.last() == Some(&b'\n') {
+            buf.pop();
+            if buf.last() == Some(&b'\r') {
+                buf.pop();
+            }
+        }
+        let text = String::from_utf8_lossy(&buf);
+        let pieces: Vec<&str> = text.split('\r').filter(|p| !p.is_empty()).collect();
+        if pieces.len() > CR_COALESCE_THRESHOLD {
+            if let Some(last) = pieces.last() {
+                emit((*last).to_string());
+            }
+        } else {
+            for p in pieces {
+                emit(p.to_string());
+            }
+        }
+    }
+}
+
 use crate::store::{HistoryEntry, Store};
 
 /// Packages with an operation currently in flight, keyed by (eco, pkg). Not a
@@ -272,7 +318,7 @@ pub fn run_op(
             let app2 = app.clone();
             let id2 = op_id.clone();
             handles.push(std::thread::spawn(move || {
-                for line in BufReader::new(pipe).lines().map_while(Result::ok) {
+                stream_lines(pipe, |line| {
                     let _ = app2.emit(
                         "transfer-line",
                         LineEvent {
@@ -281,14 +327,14 @@ pub fn run_op(
                             line,
                         },
                     );
-                }
+                });
             }));
         }
         if let Some(pipe) = child.stderr.take() {
             let app2 = app.clone();
             let id2 = op_id.clone();
             handles.push(std::thread::spawn(move || {
-                for line in BufReader::new(pipe).lines().map_while(Result::ok) {
+                stream_lines(pipe, |line| {
                     let _ = app2.emit(
                         "transfer-line",
                         LineEvent {
@@ -297,7 +343,7 @@ pub fn run_op(
                             line,
                         },
                     );
-                }
+                });
             }));
         }
 
@@ -461,5 +507,56 @@ mod tests {
         assert!(try_begin("pip", "in-flight-eco-test"));
         finish("npm", "in-flight-eco-test");
         finish("pip", "in-flight-eco-test");
+    }
+
+    #[test]
+    fn stream_lines_round_trips_plain_lines() {
+        let input = b"one\ntwo\nthree\n".to_vec();
+        let mut out = Vec::new();
+        stream_lines(std::io::Cursor::new(input), |l| out.push(l));
+        assert_eq!(out, vec!["one", "two", "three"]);
+    }
+
+    #[test]
+    fn stream_lines_lossy_decodes_invalid_utf8_and_keeps_going() {
+        // A stray invalid-UTF-8 byte used to end the whole iterator via
+        // BufRead::lines()'s Err propagating through the old filter-and-stop
+        // adapter. It must now decode to U+FFFD and let later lines through.
+        let input = b"ok\n\xFF\nafter\n".to_vec();
+        let mut out = Vec::new();
+        stream_lines(std::io::Cursor::new(input), |l| out.push(l));
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[0], "ok");
+        assert!(out[1].contains('\u{FFFD}'));
+        assert_eq!(out[2], "after");
+    }
+
+    #[test]
+    fn stream_lines_splits_on_cr_for_progress_output() {
+        let input = b"10%\r50%\r100%\n".to_vec();
+        let mut out = Vec::new();
+        stream_lines(std::io::Cursor::new(input), |l| out.push(l));
+        assert_eq!(out, vec!["10%", "50%", "100%"]);
+    }
+
+    #[test]
+    fn stream_lines_emits_final_partial_line_without_trailing_newline() {
+        let input = b"no newline at end".to_vec();
+        let mut out = Vec::new();
+        stream_lines(std::io::Cursor::new(input), |l| out.push(l));
+        assert_eq!(out, vec!["no newline at end"]);
+    }
+
+    #[test]
+    fn stream_lines_coalesces_a_flood_of_cr_pieces_to_the_last() {
+        let mut input = String::new();
+        for i in 0..200 {
+            input.push_str(&i.to_string());
+            input.push('\r');
+        }
+        input.push_str("done\n");
+        let mut out = Vec::new();
+        stream_lines(std::io::Cursor::new(input.into_bytes()), |l| out.push(l));
+        assert_eq!(out, vec!["done"]);
     }
 }
