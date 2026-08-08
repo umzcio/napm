@@ -82,6 +82,14 @@ fn url_for(eco: &str, pkg: &str) -> Option<String> {
             "https://pypi.org/pypi/{}/json",
             crate::http::encode(pkg)
         )),
+        // crates.io's JSON API doc (a single fetch covers name/version/
+        // description/downloads), the same shape every other eco's doc cache
+        // entry follows. The shared http.rs agent's "napm" user-agent clears
+        // crates.io's block on default/empty user agents.
+        "cargo" => Some(format!(
+            "https://crates.io/api/v1/crates/{}",
+            crate::http::encode(pkg)
+        )),
         _ => None,
     }
 }
@@ -235,6 +243,30 @@ mod tests {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
         assert!(!name.contains('/'), "filename must not contain '/': {name}");
         assert!(path.exists(), "expected the sanitized path to be written");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cargo_doc_is_fetched_and_cached_like_other_ecosystems() {
+        let dir =
+            std::env::temp_dir().join(format!("napm_regdoc_test_cargo_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+
+        let result = doc_with(
+            |url| {
+                assert!(url.contains("crates.io/api/v1/crates/ripgrep"));
+                Ok(r#"{"crate":{"max_version":"14.1.1"}}"#.to_string())
+            },
+            "cargo",
+            "ripgrep",
+            &dir,
+        );
+        assert_eq!(
+            result.as_deref(),
+            Some(r#"{"crate":{"max_version":"14.1.1"}}"#)
+        );
+        let path = disk_path("cargo", "ripgrep", &dir);
+        assert!(path.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

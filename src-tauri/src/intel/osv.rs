@@ -7,6 +7,7 @@ pub fn osv_ecosystem(eco: &str) -> Option<&'static str> {
     match eco {
         "npm" | "npx" => Some("npm"),
         "pip" => Some("PyPI"),
+        "cargo" => Some("crates.io"),
         _ => None,
     }
 }
@@ -253,6 +254,7 @@ mod tests {
     fn ecosystem_maps_and_excludes_brew() {
         assert_eq!(osv_ecosystem("npm"), Some("npm"));
         assert_eq!(osv_ecosystem("pip"), Some("PyPI"));
+        assert_eq!(osv_ecosystem("cargo"), Some("crates.io"));
         assert_eq!(osv_ecosystem("brew"), None);
     }
 
