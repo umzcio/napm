@@ -3,6 +3,7 @@ use serde::Serialize;
 use std::path::Path;
 
 pub mod brew;
+pub mod cargo;
 pub mod npm;
 pub mod pip;
 
@@ -37,10 +38,10 @@ pub fn merge(sources: Vec<Vec<SearchResult>>) -> Vec<SearchResult> {
     out
 }
 
-/// Federated swarm search: npm + brew + pip, merged and sorted. Each source
-/// fails independently to an empty list, so one dead registry never blanks the
-/// grid. `cache_dir` holds the brew catalog/analytics caches. Only sources
-/// enabled in `sources` are queried (npx is not a search source).
+/// Federated swarm search: npm + brew + pip + cargo, merged and sorted. Each
+/// source fails independently to an empty list, so one dead registry never
+/// blanks the grid. `cache_dir` holds the brew catalog/analytics caches. Only
+/// sources enabled in `sources` are queried (npx is not a search source).
 pub fn search_all(query: &str, cache_dir: &Path, sources: Sources) -> Vec<SearchResult> {
     let query = query.trim();
     if query.is_empty() {
@@ -65,10 +66,16 @@ pub fn search_all(query: &str, cache_dir: &Path, sources: Sources) -> Vec<Search
         } else {
             None
         };
+        let c = if sources.cargo {
+            Some(s.spawn(|| cargo::search_cargo(query)))
+        } else {
+            None
+        };
         merge(vec![
             n.map(|h| h.join().unwrap_or_default()).unwrap_or_default(),
             b.map(|h| h.join().unwrap_or_default()).unwrap_or_default(),
             p.map(|h| h.join().unwrap_or_default()).unwrap_or_default(),
+            c.map(|h| h.join().unwrap_or_default()).unwrap_or_default(),
         ])
     })
 }
