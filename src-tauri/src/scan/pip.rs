@@ -2,7 +2,9 @@ use super::InstalledTool;
 use serde_json::Value;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::process::Command;
+use std::sync::OnceLock;
 
 /// Merge `pip list --format=json` (installed) with
 /// `pip list --outdated --format=json` (latest), keyed by lowercased name.
@@ -81,19 +83,54 @@ pub fn parse_pip(list_json: &str, outdated_json: &str) -> Vec<InstalledTool> {
         .collect()
 }
 
-/// Find a working pip binary. This machine has `pip3` but no `pip`.
+/// Find a working pip binary. This machine has `pip3` but no `pip`. Memoized
+/// per-process: probing `pip3 --version`/`pip --version` is a real subprocess
+/// spawn, and this is called once per scan plus once per install/rollback
+/// operation. A pip binary installed or removed while napm is running is only
+/// picked up after an app restart.
 pub(crate) fn pip_bin() -> Option<&'static str> {
-    for c in ["pip3", "pip"] {
-        let ok = Command::new(c)
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-        if ok {
-            return Some(c);
+    static P: OnceLock<Option<&'static str>> = OnceLock::new();
+    *P.get_or_init(|| {
+        for c in ["pip3", "pip"] {
+            let ok = Command::new(c)
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            if ok {
+                return Some(c);
+            }
         }
-    }
-    None
+        None
+    })
+}
+
+/// (site-packages directories to scan for dist-info, python's user base
+/// directory), from a single `python3 -c "import site; ..."` probe. Combines
+/// what were previously two separate python3 spawns (one here, one in
+/// scan/manual.rs) into one, memoized per-process and shared between both
+/// call sites. Per-process value: a change to the python environment while
+/// napm is running is only picked up after an app restart. Empty/None when
+/// python3 is unavailable or produces no output.
+pub(crate) fn python_site() -> &'static (Vec<PathBuf>, Option<PathBuf>) {
+    static P: OnceLock<(Vec<PathBuf>, Option<PathBuf>)> = OnceLock::new();
+    P.get_or_init(|| {
+        let out = super::run(
+            "python3",
+            &[
+                "-c",
+                "import site; print('\\n'.join(site.getsitepackages()+[site.getusersitepackages(), site.getuserbase()]))",
+            ],
+        );
+        let mut lines: Vec<&str> = out.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+        let userbase = if lines.is_empty() {
+            None
+        } else {
+            Some(PathBuf::from(lines.remove(lines.len() - 1)))
+        };
+        let dirs = lines.into_iter().map(PathBuf::from).collect();
+        (dirs, userbase)
+    })
 }
 
 /// Per-package metadata gathered from a dist-info directory.
@@ -109,14 +146,8 @@ struct PipMeta {
 /// defaults to the user site on macOS, so both must be scanned).
 fn pip_metadata() -> BTreeMap<String, PipMeta> {
     let mut map = BTreeMap::new();
-    let listing = super::run(
-        "python3",
-        &[
-            "-c",
-            "import site; print('\\n'.join(site.getsitepackages()+[site.getusersitepackages()]))",
-        ],
-    );
-    for dir in listing.lines().map(str::trim).filter(|l| !l.is_empty()) {
+    let (dirs, _) = python_site();
+    for dir in dirs {
         let entries = match std::fs::read_dir(dir) {
             Ok(e) => e,
             Err(_) => continue,
