@@ -1337,9 +1337,15 @@
         ? h` <span class="muted" style="font-size:10px">(exported at ${r.manifestVersion})</span>` : '';
       var reasonHtml = (showReasons && r.reason)
         ? h`<div class="signal warn" style="margin:2px 0 4px">${r.reason}</div>` : '';
+      // ver/exported/reasonHtml are already fully-rendered HTML strings (each
+      // built by its own h`` call above), so they are concatenated directly
+      // here, NOT re-wrapped in raw(): raw() only unwraps when interpolated
+      // as a ${} inside an h`` template, and plain "+" string concatenation
+      // does not know how to unwrap it (it would stringify to
+      // "[object Object]" instead).
       return h`<div style="padding:2px 0;border-bottom:1px solid var(--dgray)">`+
-        h`<span class="src ${r.eco}">${r.eco}</span> <b>${r.pkg}</b>`+raw(ver)+raw(exported)+
-        raw(reasonHtml)+'</div>';
+        h`<span class="src ${r.eco}">${r.eco}</span> <b>${r.pkg}</b>`+ver+exported+
+        reasonHtml+'</div>';
     }).join("");
     return h`<div style="margin-top:10px"><b>${title}</b> <span class="muted">(${rows.length})</span>`+
       '<div style="max-height:150px;overflow:auto;margin-top:4px">'+items+'</div></div>';
@@ -1365,13 +1371,15 @@
       var p=IMPORT_STATE.preview;
       var when = p.generatedAt ? h`<div class="muted" style="margin-top:2px">exported ${p.generatedAt}</div>` : '';
       var noneAtAll = !p.willInstall.length && !p.alreadyPresent.length && !p.cannotInstall.length;
+      // Same note as importBucketHtml above: when/importBucketHtml(...) are
+      // already-rendered HTML strings, concatenated directly (not raw()-wrapped).
       box.innerHTML=h`<div class="m-h">Import preview<span class="x" data-close>×</span></div>`+
         '<div class="m-b">'+
-        raw(when)+
+        when+
         (noneAtAll ? '<div class="empty" style="margin-top:8px">This manifest has no tools in it.</div>' : '')+
-        raw(importBucketHtml("Will install", p.willInstall, false))+
-        raw(importBucketHtml("Already present", p.alreadyPresent, false))+
-        raw(importBucketHtml("Cannot install", p.cannotInstall, true))+
+        importBucketHtml("Will install", p.willInstall, false)+
+        importBucketHtml("Already present", p.alreadyPresent, false)+
+        importBucketHtml("Cannot install", p.cannotInstall, true)+
         '<div style="margin-top:12px;text-align:right"><button class="btn" data-close>Cancel</button> '+
         '<button class="btn primary" data-import-confirm'+(p.willInstall.length?'':' disabled')+'>Import '+p.willInstall.length+' tool'+(p.willInstall.length===1?'':'s')+'</button></div>'+
         '</div>';
@@ -1419,8 +1427,10 @@
     var failedHtml = seqSummary.failed.length
       ? h`<div class="signal danger" style="margin-top:8px"><span class="lbl">failed:</span> ${seqSummary.failed.join(", ")}</div>`
       : '';
+    // failedHtml is already a rendered HTML string; concatenated directly
+    // (not raw()-wrapped -- see the note in importBucketHtml above).
     box.innerHTML=h`<div class="m-h">Import complete<span class="x" data-close>×</span></div>`+
-      '<div class="m-b">'+h`<div>${msg}</div>`+raw(failedHtml)+
+      '<div class="m-b">'+h`<div>${msg}</div>`+failedHtml+
       '<div style="margin-top:12px;text-align:right"><button class="btn primary" data-close>OK</button></div></div>';
     document.getElementById("modalBack").style.display="flex";
   }
