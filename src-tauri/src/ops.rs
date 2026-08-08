@@ -42,6 +42,11 @@ fn valid_version(v: &str) -> bool {
 /// binary (e.g. "pip3"). Returns None for unsupported combinations, notably
 /// brew rollback (Homebrew keeps no old bottles), or when `pkg`/`version`
 /// fail the argument-injection gate (see valid_pkg/valid_version).
+///
+/// `remove` actions do not consume a version (there is nothing to pin), so
+/// the version gate does not apply to them; the frontend passes an empty
+/// target for display purposes only. Every other action still requires a
+/// `valid_version`.
 pub fn build_command(
     eco: &str,
     pkg: &str,
@@ -49,10 +54,22 @@ pub fn build_command(
     action: &str,
     pip_bin: &str,
 ) -> Option<(String, Vec<String>)> {
-    if !valid_pkg(eco, pkg) || !valid_version(version) {
+    if !valid_pkg(eco, pkg) {
+        return None;
+    }
+    if action != "remove" && !valid_version(version) {
         return None;
     }
     match (eco, action) {
+        ("npm", "remove") => Some((
+            "npm".to_string(),
+            vec![
+                "rm".to_string(),
+                "-g".to_string(),
+                "--".to_string(),
+                pkg.to_string(),
+            ],
+        )),
         ("npm", _) => Some((
             "npm".to_string(),
             vec![
@@ -60,6 +77,17 @@ pub fn build_command(
                 "-g".to_string(),
                 "--".to_string(),
                 format!("{}@{}", pkg, version),
+            ],
+        )),
+        // The -y is required: run_op pipes no stdin, so pip's interactive
+        // "Proceed (y/n)?" confirmation would hang the transfer forever.
+        ("pip", "remove") => Some((
+            pip_bin.to_string(),
+            vec![
+                "uninstall".to_string(),
+                "-y".to_string(),
+                "--".to_string(),
+                pkg.to_string(),
             ],
         )),
         ("pip", _) => Some((
@@ -78,6 +106,12 @@ pub fn build_command(
             "brew".to_string(),
             vec!["install".to_string(), pkg.to_string()],
         )),
+        // Homebrew has no reliable "--" end-of-options marker either; same
+        // reliance on the valid_pkg gate as install/update above.
+        ("brew", "remove") => Some((
+            "brew".to_string(),
+            vec!["uninstall".to_string(), pkg.to_string()],
+        )),
         // npx Promote to global: install the package globally via npm.
         ("npx", "promote") => Some((
             "npm".to_string(),
@@ -90,6 +124,40 @@ pub fn build_command(
         )),
         _ => None,
     }
+}
+
+/// Installed formulae that currently depend on `pkg`, via `brew uses
+/// --installed <pkg>`. Best effort: returns an empty Vec on any spawn, exit,
+/// or output-parsing failure so a broken/missing `brew` never blocks
+/// uninstall from proceeding (the real `brew uninstall` remains the source
+/// of truth and streams its own honest failure if dependents actually
+/// block it).
+pub fn brew_dependents(pkg: &str) -> Vec<String> {
+    if !valid_pkg("brew", pkg) {
+        return Vec::new();
+    }
+    let output = match Command::new("brew")
+        .args(["uses", "--installed", pkg])
+        .output()
+    {
+        Ok(o) => o,
+        Err(_) => return Vec::new(),
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    parse_brew_uses(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Parse `brew uses --installed` stdout (one formula name per line) into a
+/// list of dependent names. Split out from `brew_dependents` so the parsing
+/// logic is unit-testable without actually spawning `brew`.
+fn parse_brew_uses(stdout: &str) -> Vec<String> {
+    stdout
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect()
 }
 
 /// Render a (program, args) pair as the shell-ish string shown to the user,
@@ -428,6 +496,66 @@ mod tests {
     #[test]
     fn brew_rollback_is_unsupported() {
         assert!(build_command("brew", "ripgrep", "14.0.0", "rollback", "pip3").is_none());
+    }
+
+    #[test]
+    fn npm_remove_builds_rm_g() {
+        let (prog, args) = build_command("npm", "cowsay", "1.6.0", "remove", "pip3").unwrap();
+        assert_eq!(prog, "npm");
+        assert_eq!(args, vec!["rm", "-g", "--", "cowsay"]);
+    }
+
+    #[test]
+    fn pip_remove_uses_yes_flag_and_given_binary() {
+        let (prog, args) = build_command("pip", "httpie", "3.2.2", "remove", "pip3").unwrap();
+        assert_eq!(prog, "pip3");
+        assert_eq!(args, vec!["uninstall", "-y", "--", "httpie"]);
+    }
+
+    #[test]
+    fn brew_remove_builds_uninstall() {
+        let (prog, args) = build_command("brew", "ripgrep", "14.1.1", "remove", "pip3").unwrap();
+        assert_eq!(prog, "brew");
+        assert_eq!(args, vec!["uninstall", "ripgrep"]);
+    }
+
+    #[test]
+    fn remove_actions_do_not_require_a_version() {
+        // Matches what the frontend actually sends: an empty target, since
+        // remove has nothing to pin to.
+        let (prog, args) = build_command("npm", "cowsay", "", "remove", "pip3").unwrap();
+        assert_eq!(prog, "npm");
+        assert_eq!(args, vec!["rm", "-g", "--", "cowsay"]);
+    }
+
+    #[test]
+    fn non_remove_actions_still_require_a_valid_version() {
+        assert!(build_command("npm", "cowsay", "", "update", "pip3").is_none());
+    }
+
+    #[test]
+    fn parse_brew_uses_empty_stdout_is_empty() {
+        assert!(parse_brew_uses("").is_empty());
+    }
+
+    #[test]
+    fn parse_brew_uses_multi_line_returns_n_entries() {
+        let out = parse_brew_uses("foo\nbar\nbaz\n");
+        assert_eq!(out, vec!["foo", "bar", "baz"]);
+    }
+
+    #[test]
+    fn parse_brew_uses_trims_and_skips_blank_lines() {
+        let out = parse_brew_uses("  foo  \n\n  bar\n");
+        assert_eq!(out, vec!["foo", "bar"]);
+    }
+
+    #[test]
+    fn brew_dependents_rejects_invalid_package_without_spawning() {
+        // A pkg that fails valid_pkg must short-circuit to empty rather than
+        // ever reaching Command::new("brew").
+        assert!(brew_dependents("-rf").is_empty());
+        assert!(brew_dependents("evil/pkg").is_empty());
     }
 
     #[test]

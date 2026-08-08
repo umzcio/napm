@@ -55,6 +55,17 @@ fn run_op(
     ops::run_op(app.clone(), store, op_id, eco, pkg, from, to, action, ts);
 }
 
+/// Installed Homebrew formulae that currently depend on `pkg`, used by the
+/// uninstall confirm modal to warn (and disable) before running a real
+/// `brew uninstall`. Best effort: an empty result means either there truly
+/// are no dependents, or the check itself could not run; either way the
+/// caller does not block on it, since the real `brew uninstall` remains the
+/// source of truth and streams its own honest failure.
+#[tauri::command(async)]
+fn brew_uninstall_check(pkg: String) -> Vec<String> {
+    ops::brew_dependents(&pkg)
+}
+
 #[tauri::command(async)]
 fn search_registry(app: tauri::AppHandle, query: String) -> Vec<search::SearchResult> {
     let dir = app
@@ -318,6 +329,7 @@ pub fn run() {
             set_pin,
             get_history,
             run_op,
+            brew_uninstall_check,
             search_registry,
             get_whats_new,
             get_changelog,
