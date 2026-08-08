@@ -207,6 +207,8 @@ pub fn scan_manual(other_names: &BTreeSet<String>) -> Vec<InstalledTool> {
                 description: real.to_string_lossy().into_owned(),
                 updated: super::path_mtime(&real),
                 requested: true,
+                status: String::new(),
+                bump: String::new(),
             });
         }
     }
@@ -260,6 +262,8 @@ mod tests {
             description: target.to_string(),
             updated: 0,
             requested: true,
+            status: String::new(),
+            bump: String::new(),
         }
     }
 
