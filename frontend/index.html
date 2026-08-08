@@ -874,7 +874,7 @@
     var titles={library:"Shared Library",search:"Search",whatsnew:"What's New",transfers:"Transfers"};
     document.querySelector(".titlebar .title").textContent="- npstr AI Package Manager ["+titles[name]+"]";
   }
-  document.querySelectorAll(".tab").forEach(function(t){ t.addEventListener("click",function(){ if(t.dataset.view==="search") runSearch(lastQuery); else { if(t.dataset.view==="whatsnew" && !FEED_LOADED) loadWhatsNew(); switchTab(t.dataset.view); } }); });
+  document.querySelectorAll(".tab").forEach(function(t){ t.addEventListener("click",function(){ if(t.dataset.view==="search"){ if(lastQuery && SWARM.length){ switchTab("search"); renderSearchResults(); } else runSearch(lastQuery); } else { if(t.dataset.view==="whatsnew" && !FEED_LOADED) loadWhatsNew(); switchTab(t.dataset.view); } }); });
 
   // Window controls: the OS window is frameless, so the Win98 titlebar IS the
   // titlebar. Dragging is handled natively via data-tauri-drag-region; here we
