@@ -58,6 +58,8 @@ pub fn parse_npm(ls_json: &str, outdated_json: &str) -> Vec<InstalledTool> {
             description: String::new(),
             updated: 0,
             requested: true,
+            status: String::new(),
+            bump: String::new(),
         })
         .collect()
 }

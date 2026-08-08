@@ -110,6 +110,8 @@ pub fn scan_npx() -> Vec<InstalledTool> {
                 description,
                 updated: super::path_mtime(&pkg_dir),
                 requested: true,
+                status: String::new(),
+                bump: String::new(),
             });
         }
     }
@@ -133,6 +135,8 @@ mod tests {
             description: String::new(),
             updated: 0,
             requested: true,
+            status: String::new(),
+            bump: String::new(),
         }
     }
 

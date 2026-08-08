@@ -67,6 +67,8 @@ pub fn parse_brew(list_versions: &str, outdated_json: &str) -> Vec<InstalledTool
             description: String::new(),
             updated: 0,
             requested: true,
+            status: String::new(),
+            bump: String::new(),
         })
         .collect()
 }
