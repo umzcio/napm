@@ -114,34 +114,51 @@ pub fn whats_new(
                 .iter()
                 .filter_map(|pkg| installed.iter().find(|t| &t.pkg == pkg))
                 .collect();
-            // Fetch release ages in parallel so wall-clock is the slowest single
-            // fetch rather than the sum of all fetches.
+            // Fetch release ages in parallel, bounded at 8 concurrent workers so a
+            // user with dozens of outdated tools does not fire one thread per
+            // package and thrash the shared HTTP connection pool / GitHub rate
+            // limit. Each worker drains its share of indices into a pre-sized
+            // slot, then results are flattened to preserve input order.
+            let mut results: Vec<Option<ReleaseInfo>> = vec![None; scope_tools.len()];
             std::thread::scope(|inner| {
-                let handles: Vec<_> = scope_tools
-                    .iter()
-                    .map(|t| {
-                        let eco = t.eco.clone();
-                        let pkg = t.pkg.clone();
-                        let ver = t.latest.clone();
-                        inner.spawn(move || -> ReleaseInfo {
-                            let (rec, age_label, reason) =
-                                release::release_verdict(&eco, &pkg, &ver, now, cache_dir);
-                            ReleaseInfo {
-                                pkg,
-                                eco,
-                                version: ver,
-                                age_label,
-                                recommendation: rec,
-                                reason,
-                            }
+                let handles: Vec<_> = registry::chunk_indices(scope_tools.len(), 8)
+                    .into_iter()
+                    .map(|idxs| {
+                        let scope_tools = &scope_tools;
+                        inner.spawn(move || -> Vec<(usize, ReleaseInfo)> {
+                            idxs.into_iter()
+                                .map(|i| {
+                                    let t = scope_tools[i];
+                                    let eco = t.eco.clone();
+                                    let pkg = t.pkg.clone();
+                                    let ver = t.latest.clone();
+                                    let (rec, age_label, reason) =
+                                        release::release_verdict(&eco, &pkg, &ver, now, cache_dir);
+                                    (
+                                        i,
+                                        ReleaseInfo {
+                                            pkg,
+                                            eco,
+                                            version: ver,
+                                            age_label,
+                                            recommendation: rec,
+                                            reason,
+                                        },
+                                    )
+                                })
+                                .collect()
                         })
                     })
                     .collect();
-                handles
-                    .into_iter()
-                    .filter_map(|h| h.join().ok())
-                    .collect::<Vec<_>>()
-            })
+                for h in handles {
+                    if let Ok(pairs) = h.join() {
+                        for (i, info) in pairs {
+                            results[i] = Some(info);
+                        }
+                    }
+                }
+            });
+            results.into_iter().flatten().collect::<Vec<_>>()
         });
 
         let sec = sec.join().unwrap_or(None);
