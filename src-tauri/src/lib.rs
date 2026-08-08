@@ -262,17 +262,23 @@ struct UpdateMeta {
     pub_date: String,
 }
 
-/// Check the release feed for a newer signed version. Returns None on no update
-/// OR any failure (a failed check never blocks or fabricates an update).
+/// Check the release feed for a newer signed version.
+///
+/// `Ok(None)` means the check ran and found no update: the app is up to
+/// date. `Ok(Some(meta))` means an update is available. `Err(msg)` means the
+/// check itself could not run (updater init failure, network error, a
+/// malformed manifest, etc). These are distinct: a failure is not the same
+/// claim as "you are up to date," and the frontend must not conflate them.
 #[tauri::command(async)]
-async fn check_for_update(app: tauri::AppHandle) -> Option<UpdateMeta> {
+async fn check_for_update(app: tauri::AppHandle) -> Result<Option<UpdateMeta>, String> {
     use tauri_plugin_updater::UpdaterExt;
-    let update = app.updater().ok()?.check().await.ok()??;
-    Some(UpdateMeta {
-        version: update.version.clone(),
-        notes: update.body.clone().unwrap_or_default(),
-        pub_date: update.date.map(|d| d.to_string()).unwrap_or_default(),
-    })
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    let update = updater.check().await.map_err(|e| e.to_string())?;
+    Ok(update.map(|u| UpdateMeta {
+        version: u.version.clone(),
+        notes: u.body.clone().unwrap_or_default(),
+        pub_date: u.date.map(|d| d.to_string()).unwrap_or_default(),
+    }))
 }
 
 /// Download, verify (against the baked-in pubkey), install, and relaunch.
