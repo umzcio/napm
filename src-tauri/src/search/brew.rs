@@ -105,9 +105,19 @@ pub fn search_parsed(
     out
 }
 
+/// Write `body` to `path` via a temp-file-then-rename, so a concurrent reader
+/// (another process, or this one under a torn write) never observes a
+/// partially written cache file. The temp file lives alongside `path` under
+/// a `.tmp` extension so the rename stays on the same filesystem.
+fn write_cache_atomic(path: &Path, body: &str) -> std::io::Result<()> {
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, body)?;
+    std::fs::rename(&tmp, path)
+}
+
 /// Return cached file content if it is under 24h old, otherwise fetch `url`,
-/// write the result to `path`, and return the new content. Returns None if
-/// the fetch fails and no cached copy exists.
+/// write the result to `path` atomically, and return the new content.
+/// Returns None if the fetch fails and no cached copy exists.
 fn cached_or_fetch(path: &Path, url: &str) -> Option<String> {
     let fresh = std::fs::metadata(path)
         .and_then(|m| m.modified())
@@ -128,7 +138,7 @@ fn cached_or_fetch(path: &Path, url: &str) -> Option<String> {
     match crate::http::get(url) {
         Ok(body) => {
             // Best-effort write; if it fails the caller still gets the body.
-            let _ = std::fs::write(path, &body);
+            let _ = write_cache_atomic(path, &body);
             Some(body)
         }
         Err(_) => {
@@ -153,8 +163,44 @@ fn catalog_cell() -> &'static Mutex<Option<CatalogCache>> {
     CELL.get_or_init(|| Mutex::new(None))
 }
 
+/// Serializes catalog fetch-and-parse across concurrent callers. Without
+/// this, the startup warm thread and a user's first search can both miss
+/// the (empty, or stale-by-mtime) in-memory cache and independently
+/// download and parse the ~10 MB formula.json. Held across the network
+/// fetch by design: cold-start brew searches queue behind one download
+/// rather than each running it.
+///
+/// Lock ordering: this gate is always acquired BEFORE catalog_cell's lock
+/// (see load_catalog). invalidate_catalog only ever locks catalog_cell and
+/// never this gate, so no path acquires the two locks in the opposite
+/// order.
+fn fetch_gate() -> &'static Mutex<()> {
+    static GATE: OnceLock<Mutex<()>> = OnceLock::new();
+    GATE.get_or_init(|| Mutex::new(()))
+}
+
+/// True when a `CatalogCache` is present, under 24h old, and non-empty.
+fn is_fresh(c: &CatalogCache) -> bool {
+    let fresh = SystemTime::now()
+        .duration_since(c.loaded)
+        .unwrap_or(Duration::MAX)
+        < Duration::from_secs(24 * 60 * 60);
+    fresh && !c.formulae.is_empty()
+}
+
+/// Whether a just-parsed catalog is unusable and should trigger a
+/// delete-and-refetch. A "fresh" (by mtime) disk file can still be corrupt
+/// or torn, in which case parsing it yields zero formulae. Extracted as a
+/// pure function so this decision is unit-testable without touching the
+/// filesystem or network.
+fn catalog_is_corrupt(formulae: &[Formula]) -> bool {
+    formulae.is_empty()
+}
+
 /// Catalog formulae plus their weekly-install analytics, returned as cheap Arc clones.
 type CatalogAndAnalytics = (Arc<Vec<Formula>>, Arc<BTreeMap<String, u64>>);
+
+const CATALOG_URL: &str = "https://formulae.brew.sh/api/formula.json";
 
 /// Load the parsed catalog and analytics, using the in-memory copy when it is
 /// under 24h old, otherwise rebuilding it from `cached_or_fetch` (which itself
@@ -164,20 +210,40 @@ fn load_catalog(cache_dir: &Path) -> Option<CatalogAndAnalytics> {
     {
         let guard = catalog_cell().lock().unwrap();
         if let Some(c) = guard.as_ref() {
-            let fresh = SystemTime::now()
-                .duration_since(c.loaded)
-                .unwrap_or(Duration::MAX)
-                < Duration::from_secs(24 * 60 * 60);
-            if fresh && !c.formulae.is_empty() {
+            if is_fresh(c) {
                 return Some((c.formulae.clone(), c.analytics.clone()));
             }
         }
     }
 
-    let catalog_json = cached_or_fetch(
-        &cache_dir.join("brew_catalog.json"),
-        "https://formulae.brew.sh/api/formula.json",
-    )?;
+    // Only one thread fetches/parses at a time; everyone else queues here.
+    let _fetch_permit = fetch_gate().lock().unwrap();
+
+    // Re-check: another thread may have filled the cache while we waited
+    // for the gate.
+    {
+        let guard = catalog_cell().lock().unwrap();
+        if let Some(c) = guard.as_ref() {
+            if is_fresh(c) {
+                return Some((c.formulae.clone(), c.analytics.clone()));
+            }
+        }
+    }
+
+    let catalog_path = cache_dir.join("brew_catalog.json");
+    let catalog_json = cached_or_fetch(&catalog_path, CATALOG_URL)?;
+    let mut formulae = parse_catalog(&catalog_json);
+    if catalog_is_corrupt(&formulae) {
+        // The disk copy may be corrupt or torn (e.g. an interleaved write
+        // from a past concurrent fetch, before this fetch was single-
+        // flighted) and still counts as "fresh" by mtime alone. Delete it
+        // and retry once so a bad file doesn't keep returning zero brew
+        // results for the rest of its 24h freshness window.
+        let _ = std::fs::remove_file(&catalog_path);
+        let catalog_json = cached_or_fetch(&catalog_path, CATALOG_URL)?;
+        formulae = parse_catalog(&catalog_json);
+    }
+
     let analytics_map = cached_or_fetch(
         &cache_dir.join("brew_analytics.json"),
         "https://formulae.brew.sh/api/analytics/install/30d.json",
@@ -185,7 +251,7 @@ fn load_catalog(cache_dir: &Path) -> Option<CatalogAndAnalytics> {
     .map(|s| parse_analytics(&s))
     .unwrap_or_default();
 
-    let formulae = Arc::new(parse_catalog(&catalog_json));
+    let formulae = Arc::new(formulae);
     let analytics = Arc::new(analytics_map);
 
     let mut guard = catalog_cell().lock().unwrap();
@@ -271,5 +337,90 @@ mod tests {
         assert_eq!(hits[0].weekly_downloads, 1_000_000); // 4M / 4
                                                          // matches description too:
         assert_eq!(search_parsed(&formulae, "json", &a).len(), 1);
+    }
+
+    /// Unique-per-test scratch dir under the OS temp dir, so parallel test
+    /// threads never collide on the same cache files.
+    fn scratch_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "napm-brew-test-{}-{}-{:?}",
+            tag,
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    }
+
+    #[test]
+    fn write_cache_atomic_leaves_no_tmp_file_behind() {
+        let dir = scratch_dir("atomic-write");
+        let path = dir.join("cache.json");
+
+        write_cache_atomic(&path, "hello").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello");
+        assert!(!path.with_extension("tmp").exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cached_or_fetch_short_circuits_to_disk_when_fresh_even_if_corrupt() {
+        // A file just written has a fresh mtime, so cached_or_fetch must
+        // return its content straight from disk without touching the
+        // network. Prove that with a URL that would fail fast if dialed.
+        let dir = scratch_dir("fresh-corrupt");
+        let path = dir.join("garbage.json");
+        std::fs::write(&path, "not valid json").unwrap();
+
+        let got = cached_or_fetch(&path, "http://127.0.0.1:1/unreachable");
+        assert_eq!(got.as_deref(), Some("not valid json"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn corrupt_catalog_parse_triggers_the_retry_decision() {
+        // A garbage or empty catalog body parses to zero formulae, which is
+        // exactly the signal load_catalog uses to delete-and-refetch.
+        assert!(catalog_is_corrupt(&parse_catalog("not valid json")));
+        assert!(catalog_is_corrupt(&parse_catalog("[]")));
+
+        let good = parse_catalog(
+            r#"[{"name":"jq","desc":"JSON processor","versions":{"stable":"1.7.1"}}]"#,
+        );
+        assert!(!catalog_is_corrupt(&good));
+    }
+
+    #[test]
+    fn fetch_gate_plus_recheck_lets_only_one_caller_do_the_work() {
+        // Mirrors load_catalog's gate-then-recheck shape: N threads race for
+        // the gate, but only the first one through finds the cache unfilled
+        // and does the (simulated) fetch; everyone else's re-check hits.
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let fetch_count = Arc::new(AtomicUsize::new(0));
+        let filled = Arc::new(AtomicBool::new(false));
+
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let fetch_count = fetch_count.clone();
+                let filled = filled.clone();
+                std::thread::spawn(move || {
+                    let _permit = fetch_gate().lock().unwrap();
+                    if !filled.load(Ordering::SeqCst) {
+                        fetch_count.fetch_add(1, Ordering::SeqCst);
+                        filled.store(true, Ordering::SeqCst);
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        assert_eq!(fetch_count.load(Ordering::SeqCst), 1);
     }
 }
