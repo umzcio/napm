@@ -147,6 +147,13 @@ impl Store {
         Self::write_json(&self.settings_path(), s);
     }
 
+    /// The app-data directory this store is rooted at. Used by callers (e.g.
+    /// the manual scanner's probe cache) that need a cache file alongside
+    /// pins/history/settings.json but are not part of Store's own state.
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
     #[cfg(test)]
     pub fn dir_for_test(&self) -> PathBuf {
         self.dir.clone()

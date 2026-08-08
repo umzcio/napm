@@ -65,8 +65,14 @@ pub(crate) fn path_mtime(path: &std::path::Path) -> i64 {
 }
 
 /// Aggregate across all sources, marking rows whose pkg is in `pins`.
-/// Only sources enabled in `sources` are scanned.
-pub fn scan_all(pins: &std::collections::BTreeSet<String>, sources: Sources) -> Vec<InstalledTool> {
+/// Only sources enabled in `sources` are scanned. `cache_dir` is passed
+/// through to the manual scanner, which caches its `<tool> --version`
+/// probing of $HOME binaries there (see `manual::scan_manual`).
+pub fn scan_all(
+    pins: &std::collections::BTreeSet<String>,
+    sources: Sources,
+    cache_dir: &std::path::Path,
+) -> Vec<InstalledTool> {
     // Fan out the four independent scanners concurrently, mirroring
     // search::search_all: three of them block on a package-manager network
     // call in a subprocess (`npm outdated`, `brew outdated`, `pip list
@@ -121,7 +127,7 @@ pub fn scan_all(pins: &std::collections::BTreeSet<String>, sources: Sources) -> 
     if sources.manual {
         let other_names: std::collections::BTreeSet<String> =
             all.iter().map(|t| t.name.clone()).collect();
-        all.extend(manual::scan_manual(&other_names));
+        all.extend(manual::scan_manual(&other_names, cache_dir));
     }
     for row in all.iter_mut() {
         row.pinned = pins.contains(&row.pkg);
@@ -156,7 +162,10 @@ mod tests {
             npx: false,
             manual: false,
         };
-        assert_eq!(scan_all(&pins, sources), Vec::new());
+        assert_eq!(
+            scan_all(&pins, sources, std::path::Path::new("/tmp")),
+            Vec::new()
+        );
     }
 
     #[test]
