@@ -16,11 +16,11 @@ npm install
 npm run tauri dev      # build the Rust backend and launch the app
 ```
 
-Run the backend tests before opening a pull request:
+Run the backend tests before opening a pull request. This includes the updater signature integration tests in `tests/updater_signature.rs`, not just the in-crate unit tests:
 
 ```bash
 cd src-tauri
-cargo test --lib
+cargo test
 ```
 
 ## Project conventions
