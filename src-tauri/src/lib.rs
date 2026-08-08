@@ -23,7 +23,7 @@ fn open_store(app: &tauri::AppHandle) -> Store {
 fn scan_installed(app: tauri::AppHandle) -> Vec<InstalledTool> {
     let store = open_store(&app);
     let pins = store.pins();
-    scan::scan_all(&pins, store.settings().sources)
+    scan::scan_all(&pins, store.settings().sources, store.dir())
 }
 
 #[tauri::command(async)]
@@ -221,7 +221,12 @@ fn clear_caches(app: tauri::AppHandle) {
         .path()
         .app_data_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."));
-    for name in ["brew_catalog.json", "brew_analytics.json", "wire.json"] {
+    for name in [
+        "brew_catalog.json",
+        "brew_analytics.json",
+        "wire.json",
+        "manual_probe.json",
+    ] {
         let _ = std::fs::remove_file(dir.join(name));
     }
     // Drop the in-memory parsed catalog too, else the fresh in-memory copy masks
