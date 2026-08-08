@@ -72,6 +72,7 @@
   .btn:active{box-shadow:inset -1px -1px var(--white), inset 1px 1px #0a0a0a,
                inset -2px -2px var(--lgray), inset 2px 2px var(--dgray); padding:1px 7px 0 9px;}
   .btn.primary{font-weight:bold;}
+  .btn.danger{color:var(--red); font-weight:bold;}
   .btn:disabled{color:var(--dgray); text-shadow:1px 1px var(--white); cursor:default;}
 
   .tabs{display:flex; padding:5px 5px 0 5px; flex:0 0 auto;}
@@ -622,7 +623,9 @@
       var isAlert=!!it.id;
       var actLabel = it.fix?("Get "+it.fix):(it.ti>=0?("Get "+TOOLS[it.ti].latest):"Get");
       var act = (it.rec==="malicious"&&it.detailLoaded&&!it.fix)
-        ? h`<div class="signal danger" style="margin-top:8px">No safe version published. Remove it: <code>${removeCmd(it)}</code></div>`
+        ? h`<div class="signal danger" style="margin-top:8px">No safe version published.`+
+          (it.ti>=0?h` <button class="btn danger rowbtn" style="margin-top:6px;display:block" data-uninstallfeed="${idx}">Uninstall</button>`:'')+
+          h`<div class="muted" style="margin-top:6px">or run: <code>${removeCmd(it)}</code></div></div>`
         : (it.ti>=0?h`<button class="btn rowbtn" style="margin-top:8px" data-getfeed="${idx}">${actLabel}</button>`:'');
       var body;
       if(isAlert){
@@ -712,7 +715,9 @@
       return;
     }
     var g=e.target.closest("[data-getfeed]");
-    if(g){ var it2=FEED[+g.dataset.getfeed]; if(it2 && it2.ti>=0){ queueTransfer(TOOLS[it2.ti], it2.fix||TOOLS[it2.ti].latest, "update"); switchTab("transfers"); } }
+    if(g){ var it2=FEED[+g.dataset.getfeed]; if(it2 && it2.ti>=0){ queueTransfer(TOOLS[it2.ti], it2.fix||TOOLS[it2.ti].latest, "update"); switchTab("transfers"); } return; }
+    var u=e.target.closest("[data-uninstallfeed]");
+    if(u){ var it3=FEED[+u.dataset.uninstallfeed]; if(it3 && it3.ti>=0) showUninstallConfirm(TOOLS[it3.ti]); }
   });
 
   // ---- TRANSFERS ---------------------------------------------------------
@@ -751,13 +756,14 @@
       return;
     }
     var rows=hist.map(function(h,hi){
-      var label=h.action==="update"?"updated":h.action==="rollback"?"rolled back":"installed";
+      var label=h.action==="update"?"updated":h.action==="rollback"?"rolled back":h.action==="remove"?"removed":"installed";
       var canRoll = h.action!=="rollback" && h.from && h.eco!=="brew";
       var rb=canRoll?'<button class="btn rowbtn" data-roll-pkg="'+esc(h.pkg)+'" data-roll-eco="'+esc(h.eco)+'" data-roll-from="'+esc(h.from)+'">Roll back</button>'
                     :'<span class="muted" title="'+(h.eco==="brew"?"Homebrew cannot downgrade":"")+'">\u2014</span>';
       var when=new Date(h.ts*1000).toLocaleString([], {month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
+      var toDisplay = h.action==="remove" ? "(removed)" : h.to;
       return '<tr data-i="'+hi+'"><td class="t">'+esc(when)+'</td><td><b>'+esc(h.pkg)+'</b></td><td class="act-'+esc(h.action)+'">'+label+'</td>'+
-        '<td class="user">'+esc(h.from||"\u2014")+' \u2192 '+esc(h.to)+'</td><td>'+rb+'</td></tr>';
+        '<td class="user">'+esc(h.from||"\u2014")+' \u2192 '+esc(toDisplay)+'</td><td>'+rb+'</td></tr>';
     }).join("");
     histWrap.innerHTML='<table class="hist"><tbody>'+rows+'</tbody></table>';
   }
@@ -867,6 +873,9 @@
       {label: brew?"Roll back (brew: not supported)":prev?("Roll back to "+prev):"Roll back",
         disabled:function(){ return brew || !prev; },
         run:function(){ if(prev){ queueTransfer(t,prev,"rollback"); switchTab("transfers"); } }},
+      {label: npx?"Uninstall... (npx cache clearing not supported)":"Uninstall...",
+        disabled:function(){ return npx || !t.installed; },
+        run:function(){ if(!npx && t.installed) showUninstallConfirm(t); }},
       {sep:true},
       {label: t.pinned?"Unpin":"Pin", run:function(){ togglePin(i); }},
       {label:"Copy package name", run:function(){ copyText(t.pkg); }},
@@ -998,7 +1007,14 @@
       x.done=true; x.ok=e.payload.success;
       if(x.ok){
         var ti=findToolIdx(x.pkg, x.eco);
-        if(ti>=0) TOOLS[ti].installed=x.to;
+        if(ti>=0){
+          if(x.action==="remove"){
+            TOOLS[ti].installed=null;
+            if(TOOLS[ti].pinned){ TOOLS[ti].pinned=false; call("set_pin",{pkg:x.pkg,pinned:false}); }
+          } else {
+            TOOLS[ti].installed=x.to;
+          }
+        }
       }
       renderXfers(); renderRows();
       FEED_LOADED=false;
@@ -1188,6 +1204,63 @@
     // On a get_settings failure, still open the dialog with safe defaults.
     i("get_settings").then(function(s){ SETTINGS=s||SETTINGS; renderPrefs(s); }).catch(function(){ renderPrefs({}); });
   };
+  // ---- UNINSTALL -----------------------------------------------------------
+  // Hard-coded self-toolchain exclusion: napm depends on these to manage
+  // packages at all, so removing them is refused before the modal's
+  // Uninstall button is ever enabled.
+  function toolchainExclusionReason(t){
+    if(t.eco==="npm" && (t.pkg==="npm"||t.pkg==="corepack")) return "part of the npm toolchain napm depends on to manage packages.";
+    if(t.eco==="pip" && (t.pkg==="pip"||t.pkg==="setuptools"||t.pkg==="wheel")) return "part of the pip toolchain napm depends on to manage packages.";
+    return null;
+  }
+  var PENDING_UNINSTALL=null;
+  function renderUninstallModal(t, state){
+    state=state||{};
+    var box=document.getElementById("modalBox");
+    var cmd=removeCmd(t);
+    var reason=state.reason||null;
+    var deps=state.dependents||[];
+    var checking=!!state.checking;
+    var blocked = !!reason || deps.length>0;
+    var pinLine = t.pinned ? h`<div class="muted" style="margin-top:6px">This tool is pinned. Uninstalling will also unpin it.</div>` : '';
+    var depsLine = deps.length ? h`<div class="signal warn" style="margin-top:6px"><span class="lbl">in use:</span> ${deps.join(", ")} still depend${deps.length===1?"s":""} on this formula. Uninstall is disabled.</div>` : '';
+    var reasonLine = reason ? h`<div class="signal warn" style="margin-top:6px">${reason} Uninstall is disabled.</div>` : '';
+    var checkingLine = checking ? '<div class="muted" style="margin-top:6px">Checking for dependents…</div>' : '';
+    var uninstallBtn = (blocked||checking)
+      ? '<button class="btn danger" disabled>Uninstall</button>'
+      : '<button class="btn danger" data-confirm-uninstall>Uninstall</button>';
+    box.innerHTML=h`<div class="m-h">Uninstall ${t.name}?<span class="x" data-close>×</span></div>`+
+      '<div class="m-b">'+
+      h`<div><span class="src ${t.eco}">${t.eco}</span> <b>${t.name}</b> ${t.installed||""}</div>`+
+      '<div class="muted" style="margin-top:6px">This runs:</div>'+
+      h`<div><code>${cmd}</code></div>`+
+      raw(pinLine)+raw(depsLine)+raw(reasonLine)+checkingLine+
+      '<div style="margin-top:12px;text-align:right"><button class="btn" data-close>Cancel</button> '+uninstallBtn+'</div>'+
+      '</div>';
+    document.getElementById("modalBack").style.display="flex";
+  }
+  window.showUninstallConfirm=function(t){
+    if(!t) return;
+    PENDING_UNINSTALL=t;
+    var reason=toolchainExclusionReason(t);
+    if(reason){ renderUninstallModal(t,{reason:reason}); return; }
+    if(t.eco==="brew"){
+      renderUninstallModal(t,{checking:true});
+      var i=inv();
+      if(!i){ renderUninstallModal(t,{}); return; }
+      i("brew_uninstall_check",{pkg:t.pkg}).then(function(deps){
+        if(PENDING_UNINSTALL!==t) return; // a later click moved the modal on
+        renderUninstallModal(t,{dependents:deps||[]});
+      }).catch(function(){
+        if(PENDING_UNINSTALL!==t) return;
+        // Check failed to run: fail open, the real `brew uninstall` is the
+        // source of truth and streams its own honest failure if blocked.
+        renderUninstallModal(t,{});
+      });
+      return;
+    }
+    renderUninstallModal(t,{});
+  };
   window.showAbout=function(){
     var box=document.getElementById("modalBox");
     var ver = window.__appVer || "";
@@ -1231,6 +1304,12 @@
       var msg=document.getElementById("updMsg"); if(msg) msg.textContent="Downloading update...";
       var i=inv();
       if(i) i("install_update").catch(function(err){ if(msg) msg.textContent="Update failed: "+err+". Try again later."; });
+      return;
+    }
+    if(e.target.hasAttribute("data-confirm-uninstall")){
+      var pending=PENDING_UNINSTALL; PENDING_UNINSTALL=null;
+      closeModal();
+      if(pending){ queueTransfer(pending,"","remove"); switchTab("transfers"); }
       return;
     }
     if(e.target.id==="modalBack" || e.target.hasAttribute("data-close")) { closeModal(); return; }
