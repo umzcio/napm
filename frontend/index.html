@@ -16,7 +16,7 @@
     --white:#fff; --dgray:#808080; --ddgray:#404040; --lgray:#dfdfdf;
     --teal:#3a8a8a; --green:#00880c; --amber:#b07d00; --red:#aa0000;
     --sel:#000080; --face:#c0c0c0;
-    --npm:#cb3837; --brew:#d07000; --pip:#2f6690; --npx:#6f42c1; --manual:#7a7a7a;
+    --npm:#cb3837; --brew:#d07000; --pip:#2f6690; --npx:#6f42c1; --cargo:#a24e2a; --manual:#7a7a7a;
     --ui:"Tahoma","Geneva",sans-serif; --mono:"VT323",monospace;
   }
   *{box-sizing:border-box;}
@@ -114,7 +114,7 @@
   /* source pills */
   .src{font-family:var(--ui); font-size:10px; font-weight:bold; color:#fff;
     padding:1px 6px; border-radius:2px;}
-  .src.npm{background:var(--npm);} .src.brew{background:var(--brew);} .src.pip{background:var(--pip);} .src.npx{background:var(--npx);} .src.manual{background:var(--manual);}
+  .src.npm{background:var(--npm);} .src.brew{background:var(--brew);} .src.pip{background:var(--pip);} .src.npx{background:var(--npx);} .src.cargo{background:var(--cargo);} .src.manual{background:var(--manual);}
 
   /* search results */
   .pkgcell{white-space:normal; max-width:330px;}
@@ -253,6 +253,7 @@
         <span class="chip" data-src="npm">npm</span>
         <span class="chip" data-src="brew">brew</span>
         <span class="chip" data-src="pip">pip</span>
+        <span class="chip" data-src="cargo">cargo</span>
       </div>
       <div id="searchResults"></div>
     </div>
@@ -356,8 +357,8 @@
   var GLYPH={update:["↑","g-up"],current:["✓","g-ok"],offline:["✗","g-off"],unmanaged:["?","g-man"]};
 
   // ---- VIEW (library filters/sort, persisted) ----------------------------
-  var VIEW = { requested:false, outdated:false, sources:{npm:true,brew:true,pip:true,npx:true,manual:true}, sort:"name", desc:true };
-  try{ var sv=JSON.parse(localStorage.getItem("napm.view")); if(sv){ VIEW=Object.assign(VIEW, sv); VIEW.sources=Object.assign({npm:true,brew:true,pip:true,npx:true,manual:true}, sv.sources||{}); } }catch(e){}
+  var VIEW = { requested:false, outdated:false, sources:{npm:true,brew:true,pip:true,npx:true,cargo:true,manual:true}, sort:"name", desc:true };
+  try{ var sv=JSON.parse(localStorage.getItem("napm.view")); if(sv){ VIEW=Object.assign(VIEW, sv); VIEW.sources=Object.assign({npm:true,brew:true,pip:true,npx:true,cargo:true,manual:true}, sv.sources||{}); } }catch(e){}
   function saveView(){ try{ localStorage.setItem("napm.view", JSON.stringify(VIEW)); }catch(e){} }
   function setSort(k){ VIEW.sort=k; saveView(); renderRows(); }
   function toggleView(k){ VIEW[k]=!VIEW[k]; saveView(); renderRows(); }
@@ -367,7 +368,7 @@
   // client-side display only). SETTINGS caches the former so the View menu can
   // grey out a filter that can never show anything because the source is not
   // scanned at all. Loaded once at startup and refreshed on Preferences save.
-  var SETTINGS = { sources:{npm:true,brew:true,pip:true,npx:true,manual:true} };
+  var SETTINGS = { sources:{npm:true,brew:true,pip:true,npx:true,cargo:true,manual:true} };
   function loadSettings(){
     var i=inv(); if(!i) return;
     i("get_settings").then(function(s){ if(s) SETTINGS=s; }).catch(function(){});
@@ -484,7 +485,8 @@
               : outdated ? h`<button class="btn rowbtn" data-install="${p.pkg}">Update</button>`
               : h`<button class="btn rowbtn" data-install="${p.pkg}">Get</button>`;
       var fire = p.weeklyDownloads>=5e6 ? ' <span class="fire" title="heavily shared">&#128293;</span>' : '';
-      var pipTag = p.eco==="pip" ? ' <span class="exact" title="pip has no search API; matched by exact name">exact match</span>' : '';
+      var pipTag = p.eco==="pip" ? ' <span class="exact" title="pip has no search API; matched by exact name">exact match</span>'
+                 : p.eco==="cargo" ? ' <span class="exact" title="crates.io has no fuzzy search here; matched by exact name">exact match</span>' : '';
       return h`<tr data-pkg="${p.pkg}">`+
         '<td class="glyph g-off">&#9834;</td>'+
         h`<td class="pkgcell"><b>${p.name}</b>${raw(fire)}${raw(pipTag)} <span class="muted">${p.pkg}</span><span class="desc">${p.description}</span></td>`+
@@ -655,12 +657,14 @@
   function removeCmd(it){
     if(it.eco==="npm"||it.eco==="npx") return "npm rm -g '"+it.pkg+"'";
     if(it.eco==="pip") return "pip uninstall '"+it.pkg+"'";
+    if(it.eco==="cargo") return "cargo uninstall '"+it.pkg+"'";
     return "brew uninstall '"+it.pkg+"'";
   }
   function registryUrl(eco, pkg){
     if(eco==="npm"||eco==="npx") return "https://www.npmjs.com/package/"+pkg;
     if(eco==="brew") return "https://formulae.brew.sh/formula/"+pkg;
     if(eco==="pip") return "https://pypi.org/project/"+pkg+"/";
+    if(eco==="cargo") return "https://crates.io/crates/"+pkg;
     return null;
   }
   // Clipboard helper only (the "Copy install command" menu item's preview
@@ -669,6 +673,7 @@
   function installCmd(eco, pkg, version){
     if(eco==="pip") return "pip install "+pkg+(version?"=="+version:"");
     if(eco==="brew") return "brew install "+pkg;
+    if(eco==="cargo") return "cargo install"+(version?" --version "+version:"")+" -- "+pkg;
     return "npm i -g "+pkg+(version?"@"+version:""); // npm / npx
   }
   function openExt(url){ if(inv() && url) call("open_external",{url:url}); }
@@ -1106,6 +1111,7 @@
       {label:function(){return sourceMenuLabel("brew");}, checked:function(){return VIEW.sources.brew;}, disabled:function(){return sourceScanDisabled("brew");}, run:function(){toggleSource("brew");}},
       {label:function(){return sourceMenuLabel("pip");}, checked:function(){return VIEW.sources.pip;}, disabled:function(){return sourceScanDisabled("pip");}, run:function(){toggleSource("pip");}},
       {label:function(){return sourceMenuLabel("npx");}, checked:function(){return VIEW.sources.npx;}, disabled:function(){return sourceScanDisabled("npx");}, run:function(){toggleSource("npx");}},
+      {label:function(){return sourceMenuLabel("cargo");}, checked:function(){return VIEW.sources.cargo;}, disabled:function(){return sourceScanDisabled("cargo");}, run:function(){toggleSource("cargo");}},
       {label:function(){return sourceMenuLabel("manual");}, checked:function(){return VIEW.sources.manual;}, disabled:function(){return sourceScanDisabled("manual");}, run:function(){toggleSource("manual");}},
       {sep:true},
       {label:"Sort by name", dot:function(){return VIEW.sort==="name";}, run:function(){setSort("name");}},
@@ -1181,8 +1187,8 @@
 
   function closeModal(){ document.getElementById("modalBack").style.display="none"; }
   function renderPrefs(s){
-    s=s||{}; var src=s.sources||{npm:true,brew:true,pip:true,npx:true,manual:true};
-    var rows=["npm","brew","pip","npx","manual"].map(function(k){
+    s=s||{}; var src=s.sources||{npm:true,brew:true,pip:true,npx:true,cargo:true,manual:true};
+    var rows=["npm","brew","pip","npx","cargo","manual"].map(function(k){
       return '<label style="display:block;margin-top:2px"><input type="checkbox" id="prefSrc_'+k+'"'+(src[k]!==false?' checked':'')+'> '+k+'</label>';
     }).join("");
     var box=document.getElementById("modalBox");
@@ -1267,9 +1273,9 @@
     box.innerHTML='<div class="m-h">About napm<span class="x" data-close>×</span></div>'+
       '<div class="m-b"><div><img src="npstr-logo.svg" alt="npstr">'+
       '<b style="font-family:var(--mono);font-size:18px;color:#00880c">napm</b> '+esc(ver)+'</div>'+
-      '<div style="margin-top:8px">npstr AI Package Manager. Tracks the CLI tools you have across npm, brew, pip, npx, and manual installs; tells you what is out of date and whether it is safe to take.</div>'+
+      '<div style="margin-top:8px">npstr AI Package Manager. Tracks the CLI tools you have across npm, brew, pip, npx, cargo, and manual installs; tells you what is out of date and whether it is safe to take.</div>'+
       '<div style="margin-top:8px">A late-90s file-sharing client for your dev tools. Homage, not affiliation.</div>'+
-      '<div class="muted" style="margin-top:8px;font-size:11px">To check your tools, napm sends package names and versions to OSV.dev for the advisory scan, registry.npmjs.org and pypi.org for versions and changelogs, formulae.brew.sh for the brew catalog, and api.github.com for release notes and the supply-chain wire (with your token if you set one). Nothing else leaves your machine, and nothing is sent anywhere else. The advisory scan can be turned off in Preferences.</div>'+
+      '<div class="muted" style="margin-top:8px;font-size:11px">To check your tools, napm sends package names and versions to OSV.dev for the advisory scan, registry.npmjs.org and pypi.org for versions and changelogs, formulae.brew.sh for the brew catalog, crates.io for cargo versions and changelogs, and api.github.com for release notes and the supply-chain wire (with your token if you set one). Nothing else leaves your machine, and nothing is sent anywhere else. The advisory scan can be turned off in Preferences.</div>'+
       '<div style="margin-top:8px"><a href="#" data-repo>github.com/umzcio/napm</a> · MIT</div></div>';
     document.getElementById("modalBack").style.display="flex";
   };
@@ -1287,6 +1293,7 @@
           brew:document.getElementById("prefSrc_brew").checked,
           pip:document.getElementById("prefSrc_pip").checked,
           npx:document.getElementById("prefSrc_npx").checked,
+          cargo:document.getElementById("prefSrc_cargo").checked,
           manual:document.getElementById("prefSrc_manual").checked
         },
         probeManual:document.getElementById("prefProbeManual").checked,
