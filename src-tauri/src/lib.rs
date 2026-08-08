@@ -113,7 +113,11 @@ fn set_settings(app: tauri::AppHandle, settings: store::Settings) {
 }
 
 #[tauri::command(async)]
-fn export_library(app: tauri::AppHandle, filename: String, content: String) {
+fn export_library(
+    app: tauri::AppHandle,
+    filename: String,
+    content: String,
+) -> Result<String, String> {
     let dir = app
         .path()
         .app_data_dir()
@@ -122,13 +126,13 @@ fn export_library(app: tauri::AppHandle, filename: String, content: String) {
     // Sanitize the frontend-supplied filename: no path separators or traversal.
     let safe = filename.replace(['/', '\\'], "_").replace("..", "_");
     let path = dir.join(safe);
-    if std::fs::write(&path, content).is_ok() {
-        // -R reveals and selects the new file in Finder.
-        let _ = std::process::Command::new("open")
-            .arg("-R")
-            .arg(&path)
-            .spawn();
-    }
+    std::fs::write(&path, content).map_err(|e| e.to_string())?;
+    // -R reveals and selects the new file in Finder.
+    let _ = std::process::Command::new("open")
+        .arg("-R")
+        .arg(&path)
+        .spawn();
+    Ok(path.to_string_lossy().to_string())
 }
 
 #[tauri::command(async)]
