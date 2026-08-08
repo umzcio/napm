@@ -1,11 +1,10 @@
 {
   "name": "napm",
-  "version": "0.1.0",
+  "version": "0.1.4",
   "description": "A peer-to-peer package manager for your command-line dev tools.",
   "license": "MIT",
-  "bin": {
-    "napm": "reference/scanner.js"
-  },
+  "private": true,
+  "repository": "github:umzcio/napm",
   "scripts": {
     "demo": "node reference/scanner.js --demo",
     "tauri": "tauri"
