@@ -337,7 +337,6 @@
   function ago(ts){ if(!ts) return "—"; var d=Math.floor((Date.now()/1000-ts)/86400);
     if(d<0) d=0; if(d<1) return "today"; if(d<7) return d+"d"; if(d<30) return Math.floor(d/7)+"w";
     if(d<365) return Math.floor(d/30)+"mo"; return Math.floor(d/365)+"y"; }
-  function findTool(pkg){ for(var i=0;i<TOOLS.length;i++) if(TOOLS[i].pkg===pkg) return i; return -1; }
 
   var selected=null, lastQuery="";
   var rowsEl=document.getElementById("rows");
@@ -447,7 +446,7 @@
       return;
     }
     var body=hits.map(function(p){
-      var ti=findTool(p.pkg), inLib = ti>=0 && TOOLS[ti].installed;
+      var ti=findToolIdx(p.pkg, p.eco), inLib = ti>=0 && TOOLS[ti].installed;
       var outdated = ti>=0 && statusOf(TOOLS[ti])==="update";
       var act = inLib && !outdated ? '<span class="g-ok">&#10003; in library</span>'
               : outdated ? '<button class="btn rowbtn" data-install="'+esc(p.pkg)+'">Update</button>'
@@ -500,13 +499,14 @@
   function installPackage(pkg){
     var p=null; for(var i=0;i<SWARM.length;i++) if(SWARM[i].pkg===pkg) p=SWARM[i];
     if(!p) return;
-    var ti=findTool(pkg);
+    var ti=findToolIdx(pkg, p.eco);
     if(ti>=0){
-      if(statusOf(TOOLS[ti])==="update"){ queueTransfer(ti, TOOLS[ti].latest, "update"); switchTab("transfers"); }
+      if(statusOf(TOOLS[ti])==="update"){ queueTransfer(TOOLS[ti], TOOLS[ti].latest, "update"); switchTab("transfers"); }
       return;
     }
-    TOOLS.push({name:p.name, eco:p.eco, pkg:p.pkg, installed:null, latest:p.version, size:p.size||"", publisher:"", description:p.description||"", updated:0, pinned:false, requested:true});
-    queueTransfer(TOOLS.length-1, p.version, "install");
+    var newTool={name:p.name, eco:p.eco, pkg:p.pkg, installed:null, latest:p.version, size:p.size||"", publisher:"", description:p.description||"", updated:0, pinned:false, requested:true};
+    TOOLS.push(newTool);
+    queueTransfer(newTool, p.version, "install");
     switchTab("transfers");
   }
 
@@ -668,7 +668,7 @@
       return;
     }
     var g=e.target.closest("[data-getfeed]");
-    if(g){ var it2=FEED[+g.dataset.getfeed]; if(it2 && it2.ti>=0){ queueTransfer(it2.ti, it2.fix||TOOLS[it2.ti].latest, "update"); switchTab("transfers"); } }
+    if(g){ var it2=FEED[+g.dataset.getfeed]; if(it2 && it2.ti>=0){ queueTransfer(TOOLS[it2.ti], it2.fix||TOOLS[it2.ti].latest, "update"); switchTab("transfers"); } }
   });
 
   // ---- TRANSFERS ---------------------------------------------------------
@@ -712,21 +712,21 @@
   histWrap.addEventListener("click",function(e){
     var b=e.target.closest("[data-roll-pkg]"); if(!b) return;
     var pkg=b.dataset.rollPkg, eco=b.dataset.rollEco, fromV=b.dataset.rollFrom;
-    var ti=findTool(pkg); if(ti<0) return;
-    queueTransfer(ti, fromV, "rollback"); switchTab("transfers");
+    var ti=findToolIdx(pkg, eco); if(ti<0) return;
+    queueTransfer(TOOLS[ti], fromV, "rollback"); switchTab("transfers");
   });
   function histMenu(hi, x, y){
     var h=history[hi]; if(!h) return;
     var canRoll = h.action!=="rollback" && h.from && h.eco!=="brew";
-    var ti=findTool(h.pkg);
+    var ti=findToolIdx(h.pkg, h.eco);
     openPopup([
       {label: !canRoll?"Roll back":ti<0?("Roll back to "+h.from+" (tool not in library)"):("Roll back to "+h.from),
         disabled:function(){ return !canRoll || ti<0; },
-        run:function(){ var c=findTool(h.pkg); if(canRoll && c>=0){ queueTransfer(c, h.from, "rollback"); switchTab("transfers"); } }},
+        run:function(){ var c=findToolIdx(h.pkg, h.eco); if(canRoll && c>=0){ queueTransfer(TOOLS[c], h.from, "rollback"); switchTab("transfers"); } }},
       {label:"Copy entry", run:function(){ copyText(h.pkg+" "+h.action+" "+(h.from||"-")+" -> "+h.to); }},
       {sep:true},
       {label: ti<0?"Tool not in library":"Jump to tool in library", disabled:function(){ return ti<0; },
-        run:function(){ var c=findTool(h.pkg); if(c>=0){ selected=c; switchTab("library"); renderRows(); } }}
+        run:function(){ var c=findToolIdx(h.pkg, h.eco); if(c>=0){ selected=c; switchTab("library"); renderRows(); } }}
     ], x, y);
   }
   histWrap.addEventListener("contextmenu",function(e){
@@ -735,14 +735,17 @@
     histMenu(+tr.dataset.i, e.clientX, e.clientY);
   });
   var opSeq=0;
-  function queueTransfer(ti,target,action){
-    var t=TOOLS[ti]; if(!t) return; var from=t.installed;
+  function queueTransfer(t,target,action){
+    if(!t) return;
+    var dup=xfers.find(function(z){ return !z.done && z.pkg===t.pkg && z.eco===t.eco; });
+    if(dup){ switchTab("transfers"); return; }
+    var from=t.installed;
     var cmd=(t.eco==="npm"?"npm i -g "+t.pkg+"@"+target
            :t.eco==="pip"?"pip install "+t.pkg+"=="+target
            :t.eco==="brew"?"brew install "+t.pkg
            :"npm i -g "+t.pkg);
     var opId="op"+(++opSeq);
-    var x={opId:opId,ti:ti,pkg:t.pkg,name:t.name,user:t.publisher||"unknown",cmd:cmd,lines:[],done:false,ok:false,
+    var x={opId:opId,eco:t.eco,pkg:t.pkg,name:t.name,user:t.publisher||"unknown",cmd:cmd,lines:[],done:false,ok:false,
            action:action,from:from,to:target};
     xfers.unshift(x); renderXfers();
     var inv=window.__TAURI__&&window.__TAURI__.core&&window.__TAURI__.core.invoke;
@@ -758,8 +761,8 @@
       {label:"Copy command", run:function(){ copyText(t.cmd); }},
       {sep:true},
       {label:"Re-run",
-        disabled:function(){ if(!t.done) return true; var i=findTool(t.pkg); if(i<0) return true; return t.action==="rollback"&&TOOLS[i].eco==="brew"; },
-        run:function(){ var i=findTool(t.pkg); if(i>=0) queueTransfer(i, t.to, t.action); }}
+        disabled:function(){ if(!t.done) return true; var i=findToolIdx(t.pkg, t.eco); if(i<0) return true; return t.action==="rollback"&&TOOLS[i].eco==="brew"; },
+        run:function(){ var i=findToolIdx(t.pkg, t.eco); if(i>=0) queueTransfer(TOOLS[i], t.to, t.action); }}
     ], x, y);
   }
   xferListEl.addEventListener("contextmenu",function(e){
@@ -772,13 +775,13 @@
   document.getElementById("searchBtn").addEventListener("click",function(){ runSearch(document.getElementById("search").value.trim()); });
   document.getElementById("search").addEventListener("keydown",function(e){ if(e.key==="Enter") runSearch(this.value.trim()); });
   document.getElementById("updateAll").addEventListener("click",function(){
-    TOOLS.forEach(function(t,i){ if(statusOf(t)==="update"&&t.eco!=="npx"&&!t.pinned&&isSafe(bumpKind(t.installed,t.latest))) queueTransfer(i,t.latest,"update"); }); switchTab("transfers");
+    TOOLS.forEach(function(t,i){ if(statusOf(t)==="update"&&t.eco!=="npx"&&!t.pinned&&isSafe(bumpKind(t.installed,t.latest))) queueTransfer(t,t.latest,"update"); }); switchTab("transfers");
   });
   rowsEl.addEventListener("click",function(e){
     var p=e.target.closest("[data-pin]");
     if(p){ e.stopPropagation(); togglePin(+p.dataset.pin); return; }
     var b=e.target.closest("[data-get]");
-    if(b){ e.stopPropagation(); var j=+b.dataset.get; queueTransfer(j,TOOLS[j].latest,TOOLS[j].installed?"update":"install"); switchTab("transfers"); }
+    if(b){ e.stopPropagation(); var j=+b.dataset.get; queueTransfer(TOOLS[j],TOOLS[j].latest,TOOLS[j].installed?"update":"install"); switchTab("transfers"); }
   });
   function libMenu(i, x, y){
     var t=TOOLS[i]; if(!t) return;
@@ -797,12 +800,12 @@
     var ru=registryUrl(t.eco,t.pkg);
     var feedIdx=function(){ for(var k=0;k<FEED.length;k++) if(FEED[k].pkg===t.pkg) return k; return -1; };
     openPopup([
-      st==="update"&&!npx ? {label:"Update to "+t.latest, run:function(){ queueTransfer(i,t.latest,"update"); switchTab("transfers"); }}
-        : !t.installed&&!npx ? {label:"Install", run:function(){ queueTransfer(i,t.latest,"install"); switchTab("transfers"); }}
+      st==="update"&&!npx ? {label:"Update to "+t.latest, run:function(){ queueTransfer(t,t.latest,"update"); switchTab("transfers"); }}
+        : !t.installed&&!npx ? {label:"Install", run:function(){ queueTransfer(t,t.latest,"install"); switchTab("transfers"); }}
         : {label: npx?"npx tool (cached)":"Up to date", disabled:function(){return true;}},
       {label: brew?"Roll back (brew: not supported)":prev?("Roll back to "+prev):"Roll back",
         disabled:function(){ return brew || !prev; },
-        run:function(){ if(prev){ queueTransfer(i,prev,"rollback"); switchTab("transfers"); } }},
+        run:function(){ if(prev){ queueTransfer(t,prev,"rollback"); switchTab("transfers"); } }},
       {sep:true},
       {label: t.pinned?"Unpin":"Pin", run:function(){ togglePin(i); }},
       {label:"Copy package name", run:function(){ copyText(t.pkg); }},
@@ -908,7 +911,10 @@
       var x=xfers.find(function(z){return z.opId===e.payload.op_id;});
       if(!x) return;
       x.done=true; x.ok=e.payload.success;
-      if(x.ok && x.ti!=null && TOOLS[x.ti]){ TOOLS[x.ti].installed=x.to; }
+      if(x.ok){
+        var ti=findToolIdx(x.pkg, x.eco);
+        if(ti>=0) TOOLS[ti].installed=x.to;
+      }
       renderXfers(); renderRows();
       FEED_LOADED=false;
       loadHistory();
