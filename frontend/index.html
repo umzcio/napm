@@ -111,6 +111,28 @@
   .pin{cursor:pointer; font-size:13px; filter:grayscale(1) opacity(.4); user-select:none;}
   .pin.on{filter:none;}
 
+  /* Library table: fixed layout, so the window decides the column widths instead of
+     the content deciding them and pushing the action column off the right edge.
+     Widths live here; the <colgroup> in the markup just carries the classes.
+     MAINTENANCE: any column added to this table must also get a <col> in that
+     colgroup, or fixed layout will silently render it at zero width. Tool is the
+     only auto column: it absorbs whatever the eight fixed ones leave over. */
+  #libtable{table-layout:fixed;}
+  #libtable col.c-glyph{width:26px;}
+  #libtable col.c-inst{width:100px;}
+  #libtable col.c-latest{width:104px;}
+  #libtable col.c-by{width:106px;}
+  #libtable col.c-size{width:60px;}
+  #libtable col.c-upd{width:62px;}
+  #libtable col.c-pin{width:34px;}
+  #libtable col.c-act{width:68px;}
+  /* nothing may spill out of its column: cells clip and ellipsize instead */
+  #libtable tbody td, #libtable tbody td > div{overflow:hidden; text-overflow:ellipsis;}
+  /* the name line shrinks, the source pill never does */
+  .toolname{display:flex; align-items:baseline; gap:4px; min-width:0;}
+  .toolname .tn{min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .toolname .src{flex:0 0 auto;}
+
   /* source pills */
   .src{font-family:var(--ui); font-size:10px; font-weight:bold; color:#fff;
     padding:1px 6px; border-radius:2px;}
@@ -120,7 +142,7 @@
   .pkgcell{white-space:normal; max-width:330px;}
   .pkgcell .desc{display:block; color:var(--dgray); font-size:11px; margin-top:1px;}
   .toold{display:block; color:var(--dgray); font-size:11px; margin-top:1px;
-    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:360px;}
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%;}
   tr.sel .toold{color:#cfcfe8;}
   .dl{font-family:var(--mono); font-size:15px;}
   .fire{color:var(--red);}
@@ -238,7 +260,14 @@
   <div class="panel" id="panel">
     <!-- LIBRARY -->
     <div class="view active" data-view="library">
-      <table>
+      <table id="libtable">
+        <!-- Column widths come from the stylesheet (#libtable col.*). Add a column
+             to the table and you must add its <col> here too, or the fixed layout
+             gives it zero width. Tool is deliberately the one auto column. -->
+        <colgroup>
+          <col class="c-glyph"><col class="c-tool"><col class="c-inst"><col class="c-latest">
+          <col class="c-by"><col class="c-size"><col class="c-upd"><col class="c-pin"><col class="c-act">
+        </colgroup>
         <thead><tr>
           <th></th><th>Tool</th><th>Installed</th><th>Latest</th>
           <th>Shared By</th><th>Size</th><th>Updated</th><th>Pin</th><th></th>
@@ -447,7 +476,7 @@
       var pinCell = manual ? '<span class="muted">—</span>' : h`<span class="pin ${t.pinned?'on':''}" data-pin="${i}" title="freeze version, skip Update All">📌</span>`;
       tr.innerHTML=
         h`<td class="glyph ${g[1]}"${raw(gTitleAttr)}>${g[0]}</td>`+
-        h`<td>${raw(t.pinned?'📌 ':'')}${t.name} <span class="src ${t.eco}">${t.eco}</span>${raw(descHtml)}${raw(drift)}</td>`+
+        h`<td><span class="toolname"><span class="tn">${raw(t.pinned?'📌 ':'')}${t.name}</span><span class="src ${t.eco}">${t.eco}</span></span>${raw(descHtml)}${raw(drift)}</td>`+
         h`<td class="${off?'muted':''}">${t.installed||"—"}</td>`+
         h`<td class="${noLatest?'muted':safe?'vernew':held?'verhold':'muted'}"${raw(latTitleAttr)}>${noLatest?"—":t.latest}</td>`+
         h`<td class="user${t.publisher?'':' muted'}">@${t.publisher||"unknown"}</td>`+
