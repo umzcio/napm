@@ -357,7 +357,11 @@
 
   var selected=null, lastQuery="";
   var rowsEl=document.getElementById("rows");
-  var GLYPH={update:["↑","g-up"],current:["✓","g-ok"],offline:["✗","g-off"],unmanaged:["?","g-man"]};
+  // "ahead" (installed is newer than anything the registry lists for this
+  // name) reuses the "current" tick: there is genuinely nothing newer to
+  // install. What is unknown there is the registry number, and the Latest
+  // cell says so on its own.
+  var GLYPH={update:["↑","g-up"],current:["✓","g-ok"],ahead:["✓","g-ok"],offline:["✗","g-off"],unmanaged:["?","g-man"]};
 
   // ---- VIEW (library filters/sort, persisted) ----------------------------
   var VIEW = { requested:false, outdated:false, sources:{npm:true,brew:true,pip:true,npx:true,cargo:true,manual:true}, sort:"name", desc:true };
@@ -422,8 +426,18 @@
       var held = st==="update" && !npx && !safe;
       var drift = (npx && NPX_DRIFT[t.pkg]) ? h`<div class="muted" style="font-size:11px">cached v${t.installed}, npx pulls v${NPX_DRIFT[t.pkg]} on next run</div>` : '';
       var g = manual?["?","g-man"] : npx?["♪","g-off"] : st==="update" ? (safe?["↑","g-safe"]:["↑","g-hold"]) : GLYPH[st];
-      var gTitle = manual?"unmanaged (no package manager owns this)" : (st==="update"&&!npx) ? kind+" update"+(held?" - above your appetite":"") : "";
+      // "ahead": the registry's version for this name is below what is
+      // installed, so it is not a latest and must not be printed under
+      // "Latest". npx and manual rows already get the same dash. The tooltip
+      // states the fact and lists the possible causes without picking one:
+      // a prerelease ahead of the stable channel and a name shadowed by an
+      // unrelated public package are indistinguishable from the versions alone.
+      var ahead = st==="ahead";
+      var aheadWhy = ahead ? "registry publishes "+t.latest+", which is below your "+t.installed+", so it is not shown as the latest; you may be on a prerelease, or this name may be shadowed by an unrelated public package" : "";
+      var noLatest = npx || manual || ahead;
+      var gTitle = manual?"unmanaged (no package manager owns this)" : ahead?("up to date: the registry lists nothing newer than your "+t.installed) : (st==="update"&&!npx) ? kind+" update"+(held?" - above your appetite":"") : "";
       var gTitleAttr = gTitle ? h` title="${gTitle}"` : '';
+      var latTitleAttr = aheadWhy ? h` title="${aheadWhy}"` : '';
       var tr=document.createElement("tr"); tr.dataset.i=i;
       if(selected===i) tr.className="sel";
       var action = (manual||npx) ? '<span class="muted">—</span>'
@@ -435,7 +449,7 @@
         h`<td class="glyph ${g[1]}"${raw(gTitleAttr)}>${g[0]}</td>`+
         h`<td>${raw(t.pinned?'📌 ':'')}${t.name} <span class="src ${t.eco}">${t.eco}</span>${raw(descHtml)}${raw(drift)}</td>`+
         h`<td class="${off?'muted':''}">${t.installed||"—"}</td>`+
-        h`<td class="${(npx||manual)?'muted':safe?'vernew':held?'verhold':'muted'}">${(npx||manual)?"—":t.latest}</td>`+
+        h`<td class="${noLatest?'muted':safe?'vernew':held?'verhold':'muted'}"${raw(latTitleAttr)}>${noLatest?"—":t.latest}</td>`+
         h`<td class="user${t.publisher?'':' muted'}">@${t.publisher||"unknown"}</td>`+
         h`<td class="muted">${t.size}</td>`+
         h`<td class="muted">${raw(ago(t.updated))}</td>`+

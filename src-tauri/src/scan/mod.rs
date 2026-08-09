@@ -35,7 +35,9 @@ pub struct InstalledTool {
     /// always user-chosen; for brew this is installed_on_request from the receipt).
     /// Unknown defaults to true so "only tools I installed" never wrongly hides a tool.
     pub requested: bool,
-    /// Derived library status: "unmanaged", "offline", "current", or "update".
+    /// Derived library status: "unmanaged", "offline", "current", "ahead"
+    /// (installed is newer than anything the registry lists for this name), or
+    /// "update".
     /// Stamped by `scan_all` via `version::status_of`; the frontend only reads it.
     pub status: String,
     /// Derived bump size for an available update: "major", "minor", "patch",
