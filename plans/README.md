@@ -62,10 +62,23 @@ per CONTRIBUTING.
 | 032 | Honest display when installed is ahead of the registry | P2 | S-M | — | DONE (merged as PR #12 @ 1069591; 203 tests. GUI check pending human QA) |
 | 031 | Shared Library table must fit the window | P1 | M | 032 (integration order only) | DONE (merged as PR #13 @ 8423350; confirmed by the maintainer in a dev build) |
 | 033 | Bump script must cover package-lock.json | P2 | S | — | DONE (merged as PR #14 @ f952a13; guard verified in the failing direction) |
+| 034 | CSP blocks the app's own font fetch | P1 | S | — | DONE (merged as PR #16; found by a nonce-accurate CSP harness) |
+| 035 | Tauri's style nonce disables every inline style attribute | P1 | M | — | DONE (merged as PR #15; the released v0.1.5/v0.1.6 were dimmed and unclickable) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale).
 
 \* 019 is the highest-leverage direction item but still ranks after the P1 fix plans.
+
+## Standing hazard: the CSP is only enforced in packaged builds
+
+`npm run tauri dev` does NOT apply the `csp` from `tauri.conf.json`, and Tauri appends a style
+nonce at runtime which voids `'unsafe-inline'`. Two P1 defects (034, 035) shipped because of this;
+035 made the released app dimmed and unclickable. Any change to the CSP, to inline styles, or to a
+network call must be checked with a harness that injects the production CSP **plus** `'nonce-x'` in
+`style-src` **and** `nonce="x"` on the `<style>` tag. Both halves are required: without the nonce in
+the CSP the bug does not reproduce, and without it on the tag the whole stylesheet dies for the
+wrong reason. Promoting that harness into the repo as a checked-in smoke test is unplanned and
+worth doing.
 
 ## Dependency notes
 
