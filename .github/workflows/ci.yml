@@ -77,31 +77,4 @@ jobs:
           # -> rust_decimal -> rkyv, used only for byte-unit's numeric size
           # formatting. napm never deserializes rkyv archives. Revisit when
           # Tauri bumps byte-unit/rust_decimal past rkyv >=0.8.17.
-          #
-          # The ids below are all `informational` advisories (rustsec itself
-          # tags them "unmaintained" or "unsound", not a vulnerability) that
-          # are already excluded from failing this check by the action's own
-          # logic once the Checks API call above succeeds. They are also
-          # listed here as a belt-and-suspenders measure: it keeps the job's
-          # report clean, and it means the job never has to reach the
-          # Checks API at all when nothing but these fire, in case the
-          # `permissions:` grant above is ever capped by an org policy.
-          # RUSTSEC-2024-0411 .. 0420 (atk, atk-sys, gdk, gdk-sys,
-          # gdkwayland-sys, gdkx11, gdkx11-sys, gtk, gtk-sys, gtk3-macros):
-          # the gtk-rs GTK3 binding family, archived upstream in favor of
-          # gtk4-rs. Transitive through Tauri's Linux/GTK backend, which napm
-          # (macOS-only) never builds against.
-          # RUSTSEC-2024-0370 (proc-macro-error, unmaintained): transitive
-          # through gtk3-macros, same GTK3/Linux path as above.
-          # RUSTSEC-2024-0429 (glib, unsound VariantStrIter iterator impl):
-          # transitive through the same GTK3/Linux path. Already reviewed and
-          # dismissed on the GitHub Dependabot alert with a written reason.
-          # RUSTSEC-2025-0075 / 0080 / 0081 / 0098 / 0100 (unic-char-range,
-          # unic-common, unic-char-property, unic-ucd-version, unic-ucd-ident,
-          # unmaintained): the rust-unic Unicode crate family, transitive
-          # through the same GTK3 dependency tree.
-          # RUSTSEC-2026-0190 (anyhow, unsound Error::downcast_mut): napm does
-          # not call downcast_mut on a context-wrapped anyhow::Error. Not a
-          # direct dependency; transitive only. Revisit if a direct anyhow
-          # dependency is added or usage of downcast_mut is introduced.
-          ignore: "RUSTSEC-2026-0194,RUSTSEC-2026-0195,RUSTSEC-2026-0235,RUSTSEC-2024-0411,RUSTSEC-2024-0412,RUSTSEC-2024-0413,RUSTSEC-2024-0414,RUSTSEC-2024-0415,RUSTSEC-2024-0416,RUSTSEC-2024-0417,RUSTSEC-2024-0418,RUSTSEC-2024-0419,RUSTSEC-2024-0420,RUSTSEC-2024-0370,RUSTSEC-2024-0429,RUSTSEC-2025-0075,RUSTSEC-2025-0080,RUSTSEC-2025-0081,RUSTSEC-2025-0098,RUSTSEC-2025-0100,RUSTSEC-2026-0190"
+          ignore: "RUSTSEC-2026-0194,RUSTSEC-2026-0195,RUSTSEC-2026-0235"
