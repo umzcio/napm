@@ -31,6 +31,30 @@ jobs:
         working-directory: src-tauri
   audit:
     runs-on: ubuntu-latest
+    # rustsec/audit-check needs `checks: write` to publish its result via the
+    # GitHub Checks API (POST /repos/.../check-runs). Without it the call
+    # fails with "Resource not accessible by integration".
+    #
+    # Why this only showed up on push, not on pull_request: the action's own
+    # pass/fail logic already excludes informational advisories (unmaintained,
+    # unsound, notice) from failing the check - only a real, non-informational
+    # vulnerability is supposed to fail it. But that logic only runs *after*
+    # the Checks API call succeeds. On a `pull_request` event, GitHub sets the
+    # `GITHUB_HEAD_REF` env var, and the action treats a failed Checks API
+    # call on that event as "this must be a forked PR without Checks access"
+    # and falls back to a plain log report, still gated on real vulnerabilities
+    # only. On a `push` event `GITHUB_HEAD_REF` is unset, so that fallback
+    # never triggers: the Checks API failure itself is fatal and fails the
+    # whole job, regardless of whether what triggered a report was a real
+    # vulnerability or just an informational notice. This repo's default
+    # workflow token permission is read-only (Settings > Actions > General),
+    # so the `checks: write` grant below is required, not optional.
+    #
+    # Setting `permissions:` here narrows the token to just what's listed, so
+    # `contents: read` is included explicitly for actions/checkout.
+    permissions:
+      contents: read
+      checks: write
     steps:
       - uses: actions/checkout@v4
       - uses: rustsec/audit-check@v2
@@ -38,7 +62,9 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           working-directory: src-tauri
           # Advisory-specific ignores only, each with a reason below. A new
-          # advisory not listed here still fails the job.
+          # advisory not listed here still fails the job (real vulnerabilities
+          # always fail; see the `permissions:` comment above for why that
+          # used to also happen for informational-only findings on push).
           #
           # RUSTSEC-2026-0194 / RUSTSEC-2026-0195 (quick-xml, quadratic-time and
           # unbounded-allocation DoS while parsing XML): transitive through
