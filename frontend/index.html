@@ -19,6 +19,22 @@
     --npm:#cb3837; --brew:#d07000; --pip:#2f6690; --npx:#6f42c1; --cargo:#a24e2a; --manual:#7a7a7a;
     --ui:"Tahoma","Geneva",sans-serif; --mono:"VT323",monospace;
   }
+  /* NO INLINE style ATTRIBUTES IN THIS FILE. Tauri appends a nonce to the
+     style-src directive at runtime, and per CSP Level 3 a nonce makes
+     'unsafe-inline' be ignored. A style attribute cannot carry a nonce, so
+     every one of them in the markup (including markup built in JS and dropped
+     in with innerHTML) is silently dropped in packaged builds. They still work
+     in `npm run tauri dev`, which does not enforce the CSP, so this is
+     invisible locally and only shows up in a release. It is not cosmetic: the
+     two overlay containers below were hidden this way, so the release shipped
+     with a full-viewport modal backdrop swallowing every click.
+     Hiding, sizing and spacing must therefore live in this stylesheet, or be
+     set from JS through the CSSOM (el.style.foo = ...), which the CSP does
+     not block. The guard is a plain grep. Run it before you commit and expect
+     zero hits (the character class keeps this comment from matching itself):
+         grep -n 'style=[\"]' frontend/index.html
+     Do NOT "fix" a future instance of this by weakening the CSP in
+     src-tauri/tauri.conf.json. */
   *{box-sizing:border-box;}
   html,body{height:100%;margin:0;}
   body{background:var(--face);
@@ -52,8 +68,13 @@
   .menubar span:hover{background:var(--navy); color:#fff;}
   .menubar u{text-decoration:underline;}
   .menubar span.open{background:var(--navy); color:#fff;}
+  /* Closed by default. openPopup()/closePopup() flip this through the CSSOM.
+     This MUST stay in the stylesheet: as a style attribute it is dropped in
+     packaged builds and the empty popup paints as a 180x6 gray bar over the
+     titlebar (it is absolutely positioned with no top/left until JS sets them,
+     so it lands at the .window content box's top-left corner). */
   .menu-pop{position:absolute; z-index:50; background:var(--face); border:1px solid var(--ddgray);
-    box-shadow:1px 1px 0 #000; padding:2px; font-size:12px; min-width:180px;}
+    box-shadow:1px 1px 0 #000; padding:2px; font-size:12px; min-width:180px; display:none;}
   .menu-pop .mi{display:flex; align-items:center; gap:6px; padding:3px 18px 3px 8px; cursor:default; white-space:nowrap;}
   .menu-pop .mi:hover{background:var(--navy); color:#fff;}
   .menu-pop .mi.disabled{color:var(--dgray);}
@@ -220,12 +241,50 @@
   .brand{height:20px; width:auto; display:block; image-rendering:auto;}
   .splash .bar .brand{height:18px;}
 
-  .modal-back{position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:100; display:flex; align-items:center; justify-content:center;}
+  /* Closed by default, for the same reason as .menu-pop above. Every modal
+     opens it with modalBack.style.display="flex" and closeModal() sets it back
+     to "none", both through the CSSOM; align-items/justify-content below still
+     do the centring once it is shown. */
+  .modal-back{position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:100; display:none; align-items:center; justify-content:center;}
   .modal{background:var(--face); border:1px solid var(--ddgray); box-shadow:2px 2px 0 #000; padding:0; min-width:320px; max-width:420px;}
   .modal .m-h{background:linear-gradient(90deg,var(--navy),var(--navy2)); color:#fff; font-weight:bold; padding:3px 6px; display:flex; justify-content:space-between;}
   .modal .m-h .x{cursor:pointer; padding:0 4px;}
   .modal .m-b{padding:14px; font-size:12px; line-height:1.5;}
   .modal .m-b img{width:48px; height:48px; vertical-align:middle; margin-right:8px;}
+
+  /* ---- layout and spacing classes for JS-built markup --------------------
+     These carry the exact values that used to live in inline style attributes
+     on the markup the script below builds. See the CSP note at the top of
+     this stylesheet for why they cannot stay there.
+     They are declared LAST on purpose: a style attribute used to beat every
+     component rule, and for the few properties a component rule also sets
+     (.signal's margin) equal specificity plus source order is what reproduces
+     that. Do not move this block higher. */
+  .blk{display:block;}
+  .mt2{margin-top:2px;} .mt4{margin-top:4px;} .mt6{margin-top:6px;}
+  .mt8{margin-top:8px;} .mt10{margin-top:10px;}
+  .m-actions{margin-top:12px; text-align:right;}   /* the button row every modal ends with */
+  .wfull{width:100%;}
+  .pre{white-space:pre-wrap;}
+  .note{font-size:11px;}                           /* secondary hint text */
+  .note-xs{font-size:10px;}
+  .subhead{font-weight:bold; margin-top:6px;}
+  .btn.blockbtn{display:block; margin-top:6px;}
+  .signal.feed-note{margin:6px 0;}                 /* the "not an all-clear" banners */
+  /* import: one manifest row, its reason banner, the scroll box, the drop zone
+     and the paste box */
+  .imp-row{padding:2px 0; border-bottom:1px solid var(--dgray);}
+  .signal.imp-reason{margin:2px 0 4px;}
+  .imp-list{max-height:150px; overflow:auto; margin-top:4px;}
+  #importDrop{margin-top:10px; border:1px dashed var(--ddgray); padding:14px;
+    text-align:center; font-size:11px;}
+  #importText{width:100%; height:90px; margin-top:8px; font-family:var(--mono);
+    font-size:11px; box-sizing:border-box;}
+  .about-mark{font-family:var(--mono); font-size:18px; color:var(--green);}
+  /* fixed width so the status bar does not reflow as the appetite label changes */
+  #appetiteLabel{display:inline-block; min-width:88px;}
+  /* hidden until something is transferring; renderXfers() reveals it via the CSSOM */
+  #xferBadge{display:none;}
 </style>
 </head>
 <body>
@@ -241,7 +300,7 @@
   <div class="menubar" id="menubar">
     <span data-menu="file"><u>F</u>ile</span><span data-menu="edit"><u>E</u>dit</span><span data-menu="view"><u>V</u>iew</span><span data-menu="swarm"><u>S</u>warm</span><span data-menu="help"><u>H</u>elp</span>
   </div>
-  <div class="menu-pop" id="menuPop" style="display:none"></div>
+  <div class="menu-pop" id="menuPop"></div>
 
   <div class="toolbar">
     <label>🔍</label>
@@ -254,7 +313,7 @@
     <div class="tab active" data-view="library">Shared Library</div>
     <div class="tab" data-view="whatsnew">What's New <span class="badge" id="newBadge">0</span></div>
     <div class="tab" data-view="search">Search</div>
-    <div class="tab" data-view="transfers">Transfers <span class="badge" id="xferBadge" style="display:none">0</span></div>
+    <div class="tab" data-view="transfers">Transfers <span class="badge" id="xferBadge">0</span></div>
   </div>
 
   <div class="panel" id="panel">
@@ -302,7 +361,7 @@
     <div class="sb" id="sbInstalled">0 installed</div>
     <div class="sb grow" id="sbState">tracking 0 packages</div>
     <div class="sb slider" title="Update appetite: how big a version jump counts as safe to take">
-      ⇅ <input type="range" id="appetite" min="0" max="2" step="1" value="1"> <span id="appetiteLabel" style="display:inline-block; min-width:88px;">up to minor</span>
+      ⇅ <input type="range" id="appetite" min="0" max="2" step="1" value="1"> <span id="appetiteLabel">up to minor</span>
     </div>
   </div>
 
@@ -314,7 +373,7 @@
   </div>
 </div>
 
-  <div class="modal-back" id="modalBack" style="display:none">
+  <div class="modal-back" id="modalBack">
     <div class="modal raised" id="modalBox"></div>
   </div>
 
@@ -453,7 +512,7 @@
       var kind = (st==="update"&&!npx) ? bumpOf(t) : "none";
       var safe = st==="update" && !npx && isSafe(kind);
       var held = st==="update" && !npx && !safe;
-      var drift = (npx && NPX_DRIFT[t.pkg]) ? h`<div class="muted" style="font-size:11px">cached v${t.installed}, npx pulls v${NPX_DRIFT[t.pkg]} on next run</div>` : '';
+      var drift = (npx && NPX_DRIFT[t.pkg]) ? h`<div class="muted note">cached v${t.installed}, npx pulls v${NPX_DRIFT[t.pkg]} on next run</div>` : '';
       var g = manual?["?","g-man"] : npx?["♪","g-off"] : st==="update" ? (safe?["↑","g-safe"]:["↑","g-hold"]) : GLYPH[st];
       // "ahead": the registry's version for this name is below what is
       // installed, so it is not a latest and must not be printed under
@@ -656,9 +715,9 @@
       f.innerHTML+='<div class="wire"><div class="wire-h">\ud83d\udce1 supply-chain wire</div><div class="wire-item muted">wire unavailable</div></div>';
     }
     if(SECURITY_DISABLED){
-      f.innerHTML+='<div class="signal danger" style="margin:6px 0"><span class="lbl">security:</span> advisory scan is off in Preferences, so this is not an all-clear.</div>';
+      f.innerHTML+='<div class="signal danger feed-note"><span class="lbl">security:</span> advisory scan is off in Preferences, so this is not an all-clear.</div>';
     } else if(!SECURITY_OK){
-      f.innerHTML+='<div class="signal danger" style="margin:6px 0"><span class="lbl">security:</span> check unavailable: could not reach the advisory database, so this is not an all-clear.</div>';
+      f.innerHTML+='<div class="signal danger feed-note"><span class="lbl">security:</span> check unavailable: could not reach the advisory database, so this is not an all-clear.</div>';
     }
     if(!FEED.length){
       f.innerHTML+='<div class="empty">'+(SECURITY_OK?'You\u2019re on the latest of everything, and nothing you have is flagged.':'No update verdicts to show.')+'</div>';
@@ -671,10 +730,10 @@
       var isAlert=!!it.id;
       var actLabel = it.fix?("Get "+it.fix):(it.ti>=0?("Get "+TOOLS[it.ti].latest):"Get");
       var act = (it.rec==="malicious"&&it.detailLoaded&&!it.fix)
-        ? h`<div class="signal danger" style="margin-top:8px">No safe version published.`+
-          (it.ti>=0?h` <button class="btn danger rowbtn" style="margin-top:6px;display:block" data-uninstallfeed="${idx}">Uninstall</button>`:'')+
-          h`<div class="muted" style="margin-top:6px">or run: <code>${removeCmd(it)}</code></div></div>`
-        : (it.ti>=0?h`<button class="btn rowbtn" style="margin-top:8px" data-getfeed="${idx}">${actLabel}</button>`:'');
+        ? h`<div class="signal danger mt8">No safe version published.`+
+          (it.ti>=0?h` <button class="btn danger rowbtn blockbtn" data-uninstallfeed="${idx}">Uninstall</button>`:'')+
+          h`<div class="muted mt6">or run: <code>${removeCmd(it)}</code></div></div>`
+        : (it.ti>=0?h`<button class="btn rowbtn mt8" data-getfeed="${idx}">${actLabel}</button>`:'');
       var body;
       if(isAlert){
         var txt = it.fix ? h`fixed in ${it.fix}`
@@ -688,7 +747,7 @@
           :(it.loadFailed?'<div class="muted">Changelog unavailable, could not reach the registry.</div>'
             :it.loaded?'<div class="muted">No changelog available.</div>'
             :'<div class="muted">Expand to load changelog\u2026</div>');
-        body=h`<div>${it.blurb}</div><div style="font-weight:bold;margin-top:6px">What changed</div>`+log+act;
+        body=h`<div>${it.blurb}</div><div class="subhead">What changed</div>`+log+act;
       }
       var card=document.createElement("div"); card.className="card raised"+(it.open?" open":"");
       card.innerHTML=h`<div class="card-h" data-card="${idx}"><span class="caret">${it.open?"–":"+"}</span>`+
@@ -801,7 +860,9 @@
       });
     }
     var active=xfers.filter(function(x){return !x.done;}).length;
-    badge.textContent=active; badge.style.display=active?"":"none";
+    // Explicit "inline" rather than "" because the hidden state is now the
+    // stylesheet's default (#xferBadge{display:none}); "" would reset to it.
+    badge.textContent=active; badge.style.display=active?"inline":"none";
   }
   function loadHistory(){
     if(!inv()){ history=[]; renderHistory([]); return; }
@@ -1282,19 +1343,19 @@
   function renderPrefs(s){
     s=s||{}; var src=s.sources||{npm:true,brew:true,pip:true,npx:true,cargo:true,manual:true};
     var rows=["npm","brew","pip","npx","cargo","manual"].map(function(k){
-      return '<label style="display:block;margin-top:2px"><input type="checkbox" id="prefSrc_'+k+'"'+(src[k]!==false?' checked':'')+'> '+k+'</label>';
+      return '<label class="blk mt2"><input type="checkbox" id="prefSrc_'+k+'"'+(src[k]!==false?' checked':'')+'> '+k+'</label>';
     }).join("");
     var box=document.getElementById("modalBox");
     box.innerHTML='<div class="m-h">Preferences<span class="x" data-close>×</span></div>'+
       '<div class="m-b">'+
-      '<div><b>GitHub token</b><div class="muted" style="font-size:11px">optional - raises the GitHub API rate limit for changelogs and the supply-chain wire.</div>'+
-      '<input id="prefToken" type="password" class="search" style="width:100%;margin-top:4px" value="'+esc(s.githubToken||"")+'">'+
-      '<label style="display:block;margin-top:4px;font-size:11px"><input type="checkbox" id="prefTokenShow"> show</label></div>'+
-      '<div style="margin-top:10px"><b>Sources</b>'+rows+'</div>'+
-      '<div style="margin-top:10px"><label style="display:block"><input type="checkbox" id="prefProbeManual"'+(s.probeManual!==false?' checked':'')+'> Run manual tools with --version to read their version (executes binaries found on your PATH)</label></div>'+
-      '<div style="margin-top:10px"><label style="display:block"><input type="checkbox" id="prefAdvisoryChecks"'+(s.advisoryChecks!==false?' checked':'')+'> Scan installed tools against the OSV advisory database</label>'+
-      '<div class="muted" style="font-size:11px">sends package names and versions to OSV.dev on every scan. off means no all-clear, just no check.</div></div>'+
-      '<div style="margin-top:12px;text-align:right"><button class="btn" data-close>Cancel</button> <button class="btn primary" data-prefs-save>Save</button></div>'+
+      '<div><b>GitHub token</b><div class="muted note">optional - raises the GitHub API rate limit for changelogs and the supply-chain wire.</div>'+
+      '<input id="prefToken" type="password" class="search wfull mt4" value="'+esc(s.githubToken||"")+'">'+
+      '<label class="blk mt4 note"><input type="checkbox" id="prefTokenShow"> show</label></div>'+
+      '<div class="mt10"><b>Sources</b>'+rows+'</div>'+
+      '<div class="mt10"><label class="blk"><input type="checkbox" id="prefProbeManual"'+(s.probeManual!==false?' checked':'')+'> Run manual tools with --version to read their version (executes binaries found on your PATH)</label></div>'+
+      '<div class="mt10"><label class="blk"><input type="checkbox" id="prefAdvisoryChecks"'+(s.advisoryChecks!==false?' checked':'')+'> Scan installed tools against the OSV advisory database</label>'+
+      '<div class="muted note">sends package names and versions to OSV.dev on every scan. off means no all-clear, just no check.</div></div>'+
+      '<div class="m-actions"><button class="btn" data-close>Cancel</button> <button class="btn primary" data-prefs-save>Save</button></div>'+
       '</div>';
     document.getElementById("modalBack").style.display="flex";
   }
@@ -1321,20 +1382,20 @@
     var deps=state.dependents||[];
     var checking=!!state.checking;
     var blocked = !!reason || deps.length>0;
-    var pinLine = t.pinned ? h`<div class="muted" style="margin-top:6px">This tool is pinned. Uninstalling will also unpin it.</div>` : '';
-    var depsLine = deps.length ? h`<div class="signal warn" style="margin-top:6px"><span class="lbl">in use:</span> ${deps.join(", ")} still depend${deps.length===1?"s":""} on this formula. Uninstall is disabled.</div>` : '';
-    var reasonLine = reason ? h`<div class="signal warn" style="margin-top:6px">${reason} Uninstall is disabled.</div>` : '';
-    var checkingLine = checking ? '<div class="muted" style="margin-top:6px">Checking for dependents…</div>' : '';
+    var pinLine = t.pinned ? h`<div class="muted mt6">This tool is pinned. Uninstalling will also unpin it.</div>` : '';
+    var depsLine = deps.length ? h`<div class="signal warn mt6"><span class="lbl">in use:</span> ${deps.join(", ")} still depend${deps.length===1?"s":""} on this formula. Uninstall is disabled.</div>` : '';
+    var reasonLine = reason ? h`<div class="signal warn mt6">${reason} Uninstall is disabled.</div>` : '';
+    var checkingLine = checking ? '<div class="muted mt6">Checking for dependents…</div>' : '';
     var uninstallBtn = (blocked||checking)
       ? '<button class="btn danger" disabled>Uninstall</button>'
       : '<button class="btn danger" data-confirm-uninstall>Uninstall</button>';
     box.innerHTML=h`<div class="m-h">Uninstall ${t.name}?<span class="x" data-close>×</span></div>`+
       '<div class="m-b">'+
       h`<div><span class="src ${t.eco}">${t.eco}</span> <b>${t.name}</b> ${t.installed||""}</div>`+
-      '<div class="muted" style="margin-top:6px">This runs:</div>'+
+      '<div class="muted mt6">This runs:</div>'+
       h`<div><code>${cmd}</code></div>`+
       pinLine+depsLine+reasonLine+checkingLine+
-      '<div style="margin-top:12px;text-align:right"><button class="btn" data-close>Cancel</button> '+uninstallBtn+'</div>'+
+      '<div class="m-actions"><button class="btn" data-close>Cancel</button> '+uninstallBtn+'</div>'+
       '</div>';
     document.getElementById("modalBack").style.display="flex";
   }
@@ -1380,21 +1441,21 @@
     var items=rows.map(function(r){
       var ver = showReasons ? '' : h` <span class="muted">${r.version||r.manifestVersion}</span>`;
       var exported = (!showReasons && r.manifestVersion && r.manifestVersion!==r.version)
-        ? h` <span class="muted" style="font-size:10px">(exported at ${r.manifestVersion})</span>` : '';
+        ? h` <span class="muted note-xs">(exported at ${r.manifestVersion})</span>` : '';
       var reasonHtml = (showReasons && r.reason)
-        ? h`<div class="signal warn" style="margin:2px 0 4px">${r.reason}</div>` : '';
+        ? h`<div class="signal warn imp-reason">${r.reason}</div>` : '';
       // ver/exported/reasonHtml are already fully-rendered HTML strings (each
       // built by its own h`` call above), so they are concatenated directly
       // here, NOT re-wrapped in raw(): raw() only unwraps when interpolated
       // as a ${} inside an h`` template, and plain "+" string concatenation
       // does not know how to unwrap it (it would stringify to
       // "[object Object]" instead).
-      return h`<div style="padding:2px 0;border-bottom:1px solid var(--dgray)">`+
+      return h`<div class="imp-row">`+
         h`<span class="src ${r.eco}">${r.eco}</span> <b>${r.pkg}</b>`+ver+exported+
         reasonHtml+'</div>';
     }).join("");
-    return h`<div style="margin-top:10px"><b>${title}</b> <span class="muted">(${rows.length})</span>`+
-      '<div style="max-height:150px;overflow:auto;margin-top:4px">'+items+'</div></div>';
+    return h`<div class="mt10"><b>${title}</b> <span class="muted">(${rows.length})</span>`+
+      '<div class="imp-list">'+items+'</div></div>';
   }
   function renderImportModal(){
     var box=document.getElementById("modalBox");
@@ -1408,25 +1469,25 @@
       box.innerHTML=h`<div class="m-h">Import library...<span class="x" data-close>×</span></div>`+
         '<div class="m-b">'+
         '<div class="muted">Recreate a toolchain from a napm import manifest. This cannot clone a machine: manual and npx tools have no install path, and Homebrew cannot pin a version -- every installable row below is installed at whatever is currently latest, not necessarily the exact version that was exported.</div>'+
-        '<div id="importDrop" style="margin-top:10px;border:1px dashed var(--ddgray);padding:14px;text-align:center;font-size:11px">Drop a napm-import-*.json manifest here, or paste it below</div>'+
-        h`<textarea id="importText" class="search" style="width:100%;height:90px;margin-top:8px;font-family:var(--mono);font-size:11px;box-sizing:border-box" placeholder="{&quot;schema&quot;:1,&quot;tools&quot;:[...]}">${savedText}</textarea>`+
-        (errMsg ? h`<div class="signal danger" style="margin-top:6px">${errMsg}</div>` : '')+
-        '<div style="margin-top:12px;text-align:right"><button class="btn" data-close>Cancel</button> <button class="btn primary" data-import-preview>Preview</button></div>'+
+        '<div id="importDrop">Drop a napm-import-*.json manifest here, or paste it below</div>'+
+        h`<textarea id="importText" class="search" placeholder="{&quot;schema&quot;:1,&quot;tools&quot;:[...]}">${savedText}</textarea>`+
+        (errMsg ? h`<div class="signal danger mt6">${errMsg}</div>` : '')+
+        '<div class="m-actions"><button class="btn" data-close>Cancel</button> <button class="btn primary" data-import-preview>Preview</button></div>'+
         '</div>';
     } else {
       var p=IMPORT_STATE.preview;
-      var when = p.generatedAt ? h`<div class="muted" style="margin-top:2px">exported ${p.generatedAt}</div>` : '';
+      var when = p.generatedAt ? h`<div class="muted mt2">exported ${p.generatedAt}</div>` : '';
       var noneAtAll = !p.willInstall.length && !p.alreadyPresent.length && !p.cannotInstall.length;
       // Same note as importBucketHtml above: when/importBucketHtml(...) are
       // already-rendered HTML strings, concatenated directly (not raw()-wrapped).
       box.innerHTML=h`<div class="m-h">Import preview<span class="x" data-close>×</span></div>`+
         '<div class="m-b">'+
         when+
-        (noneAtAll ? '<div class="empty" style="margin-top:8px">This manifest has no tools in it.</div>' : '')+
+        (noneAtAll ? '<div class="empty mt8">This manifest has no tools in it.</div>' : '')+
         importBucketHtml("Will install", p.willInstall, false)+
         importBucketHtml("Already present", p.alreadyPresent, false)+
         importBucketHtml("Cannot install", p.cannotInstall, true)+
-        '<div style="margin-top:12px;text-align:right"><button class="btn" data-close>Cancel</button> '+
+        '<div class="m-actions"><button class="btn" data-close>Cancel</button> '+
         '<button class="btn primary" data-import-confirm'+(p.willInstall.length?'':' disabled')+'>Import '+p.willInstall.length+' tool'+(p.willInstall.length===1?'':'s')+'</button></div>'+
         '</div>';
     }
@@ -1471,13 +1532,13 @@
     var msg=seqSummary.ok+" installed, "+seqSummary.failed.length+" failed, "+
       preview.cannotInstall.length+" skipped, "+preview.alreadyPresent.length+" already present";
     var failedHtml = seqSummary.failed.length
-      ? h`<div class="signal danger" style="margin-top:8px"><span class="lbl">failed:</span> ${seqSummary.failed.join(", ")}</div>`
+      ? h`<div class="signal danger mt8"><span class="lbl">failed:</span> ${seqSummary.failed.join(", ")}</div>`
       : '';
     // failedHtml is already a rendered HTML string; concatenated directly
     // (not raw()-wrapped -- see the note in importBucketHtml above).
     box.innerHTML=h`<div class="m-h">Import complete<span class="x" data-close>×</span></div>`+
       '<div class="m-b">'+h`<div>${msg}</div>`+failedHtml+
-      '<div style="margin-top:12px;text-align:right"><button class="btn primary" data-close>OK</button></div></div>';
+      '<div class="m-actions"><button class="btn primary" data-close>OK</button></div></div>';
     document.getElementById("modalBack").style.display="flex";
   }
   window.showAbout=function(){
@@ -1485,11 +1546,11 @@
     var ver = window.__appVer || "";
     box.innerHTML='<div class="m-h">About napm<span class="x" data-close>×</span></div>'+
       '<div class="m-b"><div><img src="npstr-logo.svg" alt="npstr">'+
-      '<b style="font-family:var(--mono);font-size:18px;color:#00880c">napm</b> '+esc(ver)+'</div>'+
-      '<div style="margin-top:8px">npstr AI Package Manager. Tracks the CLI tools you have across npm, brew, pip, npx, cargo, and manual installs; tells you what is out of date and whether it is safe to take.</div>'+
-      '<div style="margin-top:8px">A late-90s file-sharing client for your dev tools. Homage, not affiliation.</div>'+
-      '<div class="muted" style="margin-top:8px;font-size:11px">To check your tools, napm sends package names and versions to OSV.dev for the advisory scan, registry.npmjs.org and pypi.org for versions and changelogs, formulae.brew.sh for the brew catalog, crates.io for cargo versions and changelogs, and api.github.com for release notes and the supply-chain wire (with your token if you set one). Nothing else leaves your machine, and nothing is sent anywhere else. The advisory scan can be turned off in Preferences.</div>'+
-      '<div style="margin-top:8px"><a href="#" data-repo>github.com/umzcio/napm</a> · MIT</div></div>';
+      '<b class="about-mark">napm</b> '+esc(ver)+'</div>'+
+      '<div class="mt8">npstr AI Package Manager. Tracks the CLI tools you have across npm, brew, pip, npx, cargo, and manual installs; tells you what is out of date and whether it is safe to take.</div>'+
+      '<div class="mt8">A late-90s file-sharing client for your dev tools. Homage, not affiliation.</div>'+
+      '<div class="muted mt8 note">To check your tools, napm sends package names and versions to OSV.dev for the advisory scan, registry.npmjs.org and pypi.org for versions and changelogs, formulae.brew.sh for the brew catalog, crates.io for cargo versions and changelogs, and api.github.com for release notes and the supply-chain wire (with your token if you set one). Nothing else leaves your machine, and nothing is sent anywhere else. The advisory scan can be turned off in Preferences.</div>'+
+      '<div class="mt8"><a href="#" data-repo>github.com/umzcio/napm</a> · MIT</div></div>';
     document.getElementById("modalBack").style.display="flex";
   };
   document.getElementById("modalBack").addEventListener("click",function(e){
@@ -1588,9 +1649,9 @@
     var box=document.getElementById("modalBox");
     box.innerHTML='<div class="m-h">Update available<span class="x" data-close>×</span></div>'+
       '<div class="m-b"><div><b>napm v'+esc(u.version)+'</b> is available.</div>'+
-      (u.notes?'<div class="muted" style="margin-top:6px;white-space:pre-wrap">'+esc(u.notes)+'</div>':'')+
-      '<div id="updMsg" style="margin-top:8px"></div>'+
-      '<div style="margin-top:12px;text-align:right"><button class="btn" data-close>Later</button> '+
+      (u.notes?'<div class="muted mt6 pre">'+esc(u.notes)+'</div>':'')+
+      '<div id="updMsg" class="mt8"></div>'+
+      '<div class="m-actions"><button class="btn" data-close>Later</button> '+
       '<button class="btn primary" data-update-now>Update now</button></div></div>';
     document.getElementById("modalBack").style.display="flex";
   }
@@ -1598,14 +1659,14 @@
     var box=document.getElementById("modalBox");
     box.innerHTML='<div class="m-h">Check for updates<span class="x" data-close>×</span></div>'+
       '<div class="m-b"><div>You are up to date ('+esc(window.__appVer||"")+').</div>'+
-      '<div style="margin-top:12px;text-align:right"><button class="btn" data-close>OK</button></div></div>';
+      '<div class="m-actions"><button class="btn" data-close>OK</button></div></div>';
     document.getElementById("modalBack").style.display="flex";
   }
   function showUpdateCheckFailed(){
     var box=document.getElementById("modalBox");
     box.innerHTML='<div class="m-h">Check for updates<span class="x" data-close>×</span></div>'+
       '<div class="m-b"><div>Could not check for updates. This does not mean you are up to date. Check your connection and try again.</div>'+
-      '<div style="margin-top:12px;text-align:right"><button class="btn" data-close>OK</button></div></div>';
+      '<div class="m-actions"><button class="btn" data-close>OK</button></div></div>';
     document.getElementById("modalBack").style.display="flex";
   }
   function checkForUpdate(manual){
