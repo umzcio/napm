@@ -57,6 +57,11 @@ per CONTRIBUTING.
 | 024 | BUILD: cargo ecosystem | P3 | M | 023 | DONE (`advisor/024-cargo` @ f8d13d2; live cargo verification pending human QA) |
 | 025 | BUILD: library import manifest | P3 | M-L | 024 | DONE (`advisor/025-import` @ 202307f; GUI checklist pending human QA) |
 | 027 | Fix raw() concatenation bug in the uninstall modal | P1 | S | 025 | DONE (`advisor/027-raw-concat-fix` @ 21dc86b; defect in 023 found by the 025 executor, verified by differential test) |
+| 028 | README catch-up (cargo, uninstall, import) | P2 | S | 023-025 | DONE (merged as PR #9) |
+| 030 | Stop the audit job failing on push | P1 | S | — | DONE (merged as PR #11 @ ba2f0d0; confirmed green on the resulting push run to `main`) |
+| 032 | Honest display when installed is ahead of the registry | P2 | S-M | — | DONE (merged as PR #12 @ 1069591; 203 tests. GUI check pending human QA) |
+| 031 | Shared Library table must fit the window | P1 | M | 032 (integration order only) | DONE (merged as PR #13 @ 8423350; confirmed by the maintainer in a dev build) |
+| 033 | Bump script must cover package-lock.json | P2 | S | — | DONE (merged as PR #14 @ f952a13; guard verified in the failing direction) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale).
 
@@ -103,6 +108,42 @@ Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJE
   (README "Design Decisions"); not a finding.
 - **Brew rollback, pip fuzzy search, npx update paths**: documented honest
   limits; not findings.
+- **`package-lock.json` is not bumped by `scripts/bump-version.sh`** (found
+  2026-08-08 while reviewing plan 031). The script covers `package.json`,
+  `Cargo.toml`, and `tauri.conf.json`, and `release.sh` cross-checks those
+  three, but the lockfile still records `0.1.4` while everything else says
+  `0.1.5`. Any `npm install` / `npm ci` rewrites it and dirties the tree.
+  Not planned yet: two lines in the bump script plus committing the lockfile.
+  Do this before the 0.1.6 bump or it recurs.
+- **Version cells have no tooltip, so a clipped version is unrecoverable**
+  (raised by the 031 executor). Under fixed layout an extreme prerelease like
+  `0.15.0-canary.11` ellipsizes; widening the column to fit costs ~40px of the
+  Tool column at every width, which is the wrong trade. A `title` on the
+  Installed and Latest cells is the cheap fix. Note "Copy tool details" in the
+  Edit menu already recovers the full value, so this is a nit, not a defect.
+- **Two milder instances of the same "Latest" overclaim**, surfaced by the 032
+  executor and deliberately left out of its scope: (a) cargo git/path installs
+  set `latest = installed` (`scan/cargo.rs:324-334`), so they print their own
+  version under "Latest" as though the registry confirmed it; (b) `libMenu`'s
+  disabled "Up to date" label carries the same implication for an `ahead` row.
+  Both are honest-display nits, not correctness bugs. Worth one small plan
+  together if a third instance appears.
+- **What's New badge (116) not matching the status bar's outdated count (113)**:
+  correct by construction. `FEED` is alerts + verdicts (`frontend/index.html:572-586`),
+  so a security advisory against an already-current package adds a card without
+  adding an outdated tool. Not a bug.
+- **Not-installed rows in the Shared Library** (`installed: —` with a real
+  `latest` and an `Install` button): by design. `InstalledTool.installed` is
+  nullable in the canonical data model, and keeping an uninstalled tool visible
+  is the point of pins and history. Not a bug.
+- **`rustsec/audit-check` failing on push but not on pull_request**: diagnosed
+  during plan 030 as informational advisories failing the run. That was wrong.
+  The action already excludes informational advisories from its pass/fail count;
+  the job failed because the repo's default `GITHUB_TOKEN` is read-only, so the
+  Checks API call threw, and the action only swallows that error when
+  `GITHUB_HEAD_REF` is set (which GitHub sets for `pull_request` but not for
+  `push`). Fixed with a `checks: write` grant. Do not re-audit as an advisory
+  problem.
 
 ## Audit coverage note
 
