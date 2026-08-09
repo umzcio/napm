@@ -62,8 +62,8 @@ per CONTRIBUTING.
 | 032 | Honest display when installed is ahead of the registry | P2 | S-M | — | DONE (merged as PR #12 @ 1069591; 203 tests. GUI check pending human QA) |
 | 031 | Shared Library table must fit the window | P1 | M | 032 (integration order only) | DONE (merged as PR #13 @ 8423350; confirmed by the maintainer in a dev build) |
 | 033 | Bump script must cover package-lock.json | P2 | S | — | DONE (merged as PR #14 @ f952a13; guard verified in the failing direction) |
-| 034 | CSP blocks the app's own font fetch | P1 | S | — | DONE (merged as PR #16; found by a nonce-accurate CSP harness) |
-| 035 | Tauri's style nonce disables every inline style attribute | P1 | M | — | DONE (merged as PR #15; the released v0.1.5/v0.1.6 were dimmed and unclickable) |
+| 034 | CSP blocks the app's own font fetch | P1 | S | — | DONE (merged as PR #16; shipped in v0.1.7) |
+| 035 | Tauri's style nonce disables every inline style attribute | P1 | M | — | DONE (merged as PR #15; shipped in v0.1.7 and confirmed in the packaged build by the maintainer. v0.1.5/v0.1.6 were dimmed and unclickable) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale).
 
