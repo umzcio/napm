@@ -482,6 +482,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn changelog_cache_hit_rules() {
+        let lines = vec!["Fixed a bug".to_string()];
+        let empty: Vec<String> = Vec::new();
+        let now = 1_000_000;
+        // Non-empty results are a permanent hit at any age.
+        assert!(changelog_cache_hit(&lines, 0, now));
+        assert!(changelog_cache_hit(&lines, now, now));
+        // Empty results hit only within the 1h TTL.
+        assert!(changelog_cache_hit(&empty, now - 59 * 60, now));
+        assert!(!changelog_cache_hit(&empty, now - 61 * 60, now));
+        assert!(!changelog_cache_hit(&empty, 0, now));
+    }
+
+    #[test]
     fn iso_parses_known_epochs() {
         assert_eq!(iso_to_unix("1970-01-01T00:00:00Z"), Some(0));
         assert_eq!(iso_to_unix("2000-01-01T00:00:00Z"), Some(946684800));

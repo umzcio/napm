@@ -371,6 +371,24 @@ mod tests {
     }
 
     #[test]
+    fn stale_disk_fallback_reports_not_fresh() {
+        let dir = scratch_dir("stale-fallback");
+        let path = dir.join("catalog.json");
+        std::fs::write(&path, "stale body").unwrap();
+        // Backdate past the 24h TTL so the fetch is attempted.
+        let f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        f.set_modified(SystemTime::now() - Duration::from_secs(48 * 60 * 60))
+            .unwrap();
+
+        // The fetch fails fast (connection refused), so the stale disk body
+        // is served but must report fresh == false.
+        let got = cached_or_fetch(&path, "http://127.0.0.1:1/unreachable");
+        assert_eq!(got, Some(("stale body".to_string(), false)));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn corrupt_catalog_parse_triggers_the_retry_decision() {
         // A garbage or empty catalog body parses to zero formulae, which is
         // exactly the signal load_catalog uses to delete-and-refetch.

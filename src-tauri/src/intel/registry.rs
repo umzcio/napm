@@ -203,6 +203,44 @@ mod tests {
     }
 
     #[test]
+    fn stale_fallback_does_not_suppress_the_next_calls_retry() {
+        let dir =
+            std::env::temp_dir().join(format!("napm_regdoc_test_retry_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = disk_path("npm", "retry-pkg", &dir);
+        std::fs::write(&path, "old-content").unwrap();
+        // Backdate the file's mtime past the TTL so the disk layer is stale.
+        let f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        f.set_modified(std::time::SystemTime::now() - Duration::from_secs(7200))
+            .unwrap();
+
+        // Outage: the stale disk body serves this call...
+        let result = doc_with(
+            |_url| Err("network down".to_string()),
+            "npm",
+            "retry-pkg",
+            &dir,
+        );
+        assert_eq!(result.as_deref(), Some("old-content"));
+
+        // ...but the stale body must not be put into memory with a fresh
+        // timestamp: the very next call re-attempts the fetch, and the fresh
+        // body wins and gets cached.
+        let result = doc_with(
+            |_url| Ok(r#"{"recovered":true}"#.to_string()),
+            "npm",
+            "retry-pkg",
+            &dir,
+        );
+        assert_eq!(result.as_deref(), Some(r#"{"recovered":true}"#));
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            r#"{"recovered":true}"#
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn miss_with_failing_fetch_and_no_file_is_none() {
         let dir =
             std::env::temp_dir().join(format!("napm_regdoc_test_miss_{}", std::process::id()));
