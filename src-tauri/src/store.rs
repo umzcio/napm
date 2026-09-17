@@ -125,8 +125,7 @@ impl Store {
     /// a secret-bearing settings.json is never world-readable, even mid-write
     /// or after a crash.
     fn write_json<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
-        let s = serde_json::to_string_pretty(value)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let s = serde_json::to_string_pretty(value).map_err(std::io::Error::other)?;
         let tmp = path.with_extension("json.tmp");
         {
             #[cfg(unix)]
