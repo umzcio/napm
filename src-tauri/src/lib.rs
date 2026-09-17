@@ -82,7 +82,7 @@ fn search_registry(app: tauri::AppHandle, query: String) -> Vec<search::SearchRe
 fn get_whats_new(
     app: tauri::AppHandle,
     installed: Vec<intel::ToolRef>,
-    verdict_scope: Vec<String>,
+    verdict_scope: Vec<intel::ScopeRef>,
 ) -> intel::WhatsNew {
     let dir = app
         .path()
