@@ -10,6 +10,11 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      # Runs before the Rust steps: it is fast and needs no Rust build, so a
+      # CSP regression fails the job in seconds instead of after a toolchain
+      # install and cache restore.
+      - name: CSP parity
+        run: npm run check:csp
       # Pinned deliberately: a floating `stable` silently changes the active
       # lint set from under `-D warnings` whenever a new Rust version ships,
       # which makes clippy failures non-deterministic across runs. Bumping
