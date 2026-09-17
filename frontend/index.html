@@ -595,12 +595,12 @@
       var ti=findToolIdx(p.pkg, p.eco), inLib = ti>=0 && TOOLS[ti].installed;
       var outdated = ti>=0 && statusOf(TOOLS[ti])==="update";
       var act = inLib && !outdated ? '<span class="g-ok">&#10003; in library</span>'
-              : outdated ? h`<button class="btn rowbtn" data-install="${p.pkg}">Update</button>`
-              : h`<button class="btn rowbtn" data-install="${p.pkg}">Get</button>`;
+              : outdated ? h`<button class="btn rowbtn" data-install="${p.pkg}" data-eco="${p.eco}">Update</button>`
+              : h`<button class="btn rowbtn" data-install="${p.pkg}" data-eco="${p.eco}">Get</button>`;
       var fire = p.weeklyDownloads>=5e6 ? ' <span class="fire" title="heavily shared">&#128293;</span>' : '';
       var pipTag = p.eco==="pip" ? ' <span class="exact" title="pip has no search API; matched by exact name">exact match</span>'
                  : p.eco==="cargo" ? ' <span class="exact" title="crates.io has no fuzzy search here; matched by exact name">exact match</span>' : '';
-      return h`<tr data-pkg="${p.pkg}">`+
+      return h`<tr data-pkg="${p.pkg}" data-eco="${p.eco}">`+
         '<td class="glyph g-off">&#9834;</td>'+
         h`<td class="pkgcell"><b>${p.name}</b>${raw(fire)}${raw(pipTag)} <span class="muted">${p.pkg}</span><span class="desc">${p.description}</span></td>`+
         h`<td class="user">${p.version}</td>`+
@@ -613,14 +613,14 @@
   }
   resEl.addEventListener("click",function(e){
     var b=e.target.closest("[data-install]"); if(!b) return;
-    installPackage(b.dataset.install);
+    installPackage(b.dataset.install, b.dataset.eco);
   });
-  function searchMenu(pkg, x, y){
-    var p=null; for(var k=0;k<SWARM.length;k++) if(SWARM[k].pkg===pkg) p=SWARM[k];
+  function searchMenu(pkg, eco, x, y){
+    var p=null; for(var k=0;k<SWARM.length;k++) if(SWARM[k].pkg===pkg && SWARM[k].eco===eco) p=SWARM[k];
     if(!p) return;
     var ru=registryUrl(p.eco,p.pkg);
     openPopup([
-      {label:"Get / Install", run:function(){ installPackage(p.pkg); }},
+      {label:"Get / Install", run:function(){ installPackage(p.pkg, p.eco); }},
       {label:"Copy package name", run:function(){ copyText(p.pkg); }},
       {label:"Copy install command", run:function(){ copyText(installCmd(p.eco,p.pkg,p.version||undefined)); }},
       ru?{label:"Open "+p.eco+" page", run:function(){ openExt(ru); }}:null,
@@ -635,7 +635,7 @@
   resEl.addEventListener("contextmenu",function(e){
     var tr=e.target.closest("tr[data-pkg]"); if(!tr) return;
     e.preventDefault();
-    searchMenu(tr.dataset.pkg, e.clientX, e.clientY);
+    searchMenu(tr.dataset.pkg, tr.dataset.eco, e.clientX, e.clientY);
   });
   document.getElementById("srcChips").addEventListener("click",function(e){
     var c=e.target.closest("[data-src]"); if(!c) return;
@@ -643,8 +643,8 @@
     document.querySelectorAll("#srcChips .chip").forEach(function(x){ x.classList.toggle("on", x===c); });
     renderSearchResults();
   });
-  function installPackage(pkg){
-    var p=null; for(var i=0;i<SWARM.length;i++) if(SWARM[i].pkg===pkg) p=SWARM[i];
+  function installPackage(pkg, eco){
+    var p=null; for(var i=0;i<SWARM.length;i++) if(SWARM[i].pkg===pkg && SWARM[i].eco===eco) p=SWARM[i];
     if(!p) return;
     var ti=findToolIdx(pkg, p.eco);
     if(ti>=0){
@@ -662,7 +662,7 @@
     // outdated, non-npx, unpinned, within the current appetite dial.
     return TOOLS.filter(function(t){
       return statusOf(t)==="update" && t.eco!=="npx" && !t.pinned && isSafe(bumpOf(t));
-    }).map(function(t){ return t.pkg; });
+    }).map(function(t){ return {pkg:t.pkg, eco:t.eco}; });
   }
   function loadWhatsNew(){
     if(!inv()){ FEED=[]; WIRE=[]; SECURITY_OK=false; SECURITY_DISABLED=false; WIRE_OK=false; renderFeed(); return; }
