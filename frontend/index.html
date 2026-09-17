@@ -906,11 +906,11 @@
     var ti=findToolIdx(h.pkg, h.eco);
     openPopup([
       {label: !canRoll?"Roll back":ti<0?("Roll back to "+h.from+" (tool not in library)"):("Roll back to "+h.from),
-        disabled:function(){ return !canRoll || ti<0; },
+        disabled:function(){ return !canRoll || findToolIdx(h.pkg,h.eco)<0; },
         run:function(){ var c=findToolIdx(h.pkg, h.eco); if(canRoll && c>=0){ queueTransfer(TOOLS[c], h.from, "rollback"); switchTab("transfers"); } }},
       {label:"Copy entry", run:function(){ copyText(h.pkg+" "+h.action+" "+(h.from||"-")+" -> "+h.to); }},
       {sep:true},
-      {label: ti<0?"Tool not in library":"Jump to tool in library", disabled:function(){ return ti<0; },
+      {label: ti<0?"Tool not in library":"Jump to tool in library", disabled:function(){ return findToolIdx(h.pkg,h.eco)<0; },
         run:function(){ var c=findToolIdx(h.pkg, h.eco); if(c>=0){ selected=c; switchTab("library"); renderRows(); } }}
     ], x, y);
   }
@@ -1011,7 +1011,7 @@
         disabled:function(){ return npx || !t.installed; },
         run:function(){ if(!npx && t.installed) showUninstallConfirm(t); }},
       {sep:true},
-      {label: t.pinned?"Unpin":"Pin", run:function(){ togglePin(i); }},
+      {label: t.pinned?"Unpin":"Pin", run:function(){ var c=findToolIdx(t.pkg,t.eco); if(c>=0) togglePin(c); }},
       {label:"Copy package name", run:function(){ copyText(t.pkg); }},
       {label:"Copy install command", disabled:function(){ return !t.installed && !t.latest; },
         run:function(){ copyText(installCmd(t.eco,t.pkg,t.installed||t.latest||undefined)); }},
