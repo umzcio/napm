@@ -947,8 +947,14 @@
     var iv=inv();
     if(!iv){ x.done=true; x.ok=false; x.lines.push({stream:"stderr",line:"(not running in napm)"}); renderXfers(); return x; }
     // run_op has its own event-driven feedback (transfer-line/transfer-done),
-    // so this stays a raw fire-and-forget invoke rather than call().
-    iv("run_op",{opId:opId,eco:t.eco,pkg:t.pkg,from:from,to:target,action:action});
+    // so this stays a raw fire-and-forget invoke rather than call(). The
+    // .catch exists because a rejected invoke emits no transfer-done.
+    iv("run_op",{opId:opId,eco:t.eco,pkg:t.pkg,from:from,to:target,action:action})
+      .catch(function(e){
+        x.done=true; x.ok=false;
+        x.lines.push({stream:"stderr", line:summarizeErr(e)});
+        renderXfers();
+      });
     return x;
   }
 
@@ -1147,11 +1153,18 @@
       if(x.ok){
         var ti=findToolIdx(x.pkg, x.eco);
         if(ti>=0){
+          // Post-op display reconciliation. Not version logic: the op installed
+          // exactly x.to, so x.to===t.latest is the backend's "current" by string
+          // identity, and a rollback target below t.latest stays "update". Anything
+          // subtler (prerelease suffix noise) corrects itself on the next scan.
+          var t=TOOLS[ti];
           if(x.action==="remove"){
-            TOOLS[ti].installed=null;
-            if(TOOLS[ti].pinned){ TOOLS[ti].pinned=false; call("set_pin",{pkg:x.pkg,pinned:false}); }
+            t.installed=null; t.status="offline"; t.bump="none";
+            if(t.pinned){ t.pinned=false; call("set_pin",{pkg:x.pkg,pinned:false}); }
           } else {
-            TOOLS[ti].installed=x.to;
+            t.installed=x.to;
+            if(x.to===t.latest){ t.status="current"; t.bump="none"; }
+            else if(t.status==="offline"){ t.status="update"; } // installed an older-than-latest version from search
           }
         }
       }
