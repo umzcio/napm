@@ -352,7 +352,7 @@ fn velocity_verdict(
         recommendation: rec.clone(),
         reason: reason.clone(),
     }) {
-        let _ = std::fs::write(&cache_file, s);
+        let _ = crate::cache::write_atomic(&cache_file, &s);
     }
     if rec == "hold" {
         Some((rec, reason))
@@ -436,7 +436,7 @@ pub fn changelog(eco: &str, pkg: &str, version: &str, cache_dir: &Path) -> Vec<S
             // Successful HTTP response: cache even if no matching release notes were
             // found (a legitimate empty result), to avoid hammering the API.
             if let Ok(s) = serde_json::to_string(&result) {
-                let _ = std::fs::write(&cache_file, s);
+                let _ = crate::cache::write_atomic(&cache_file, &s);
             }
             result
         }

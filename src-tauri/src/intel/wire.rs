@@ -162,7 +162,7 @@ pub fn fetch_wire(cache_dir: &Path) -> Option<(Vec<WireItem>, bool)> {
     // written, so the stale cache remains available to backfill next time.
     if complete {
         if let Ok(text) = serde_json::to_string(&merged) {
-            let _ = std::fs::write(&cache_path, &text);
+            let _ = crate::cache::write_atomic(&cache_path, &text);
         }
     }
 

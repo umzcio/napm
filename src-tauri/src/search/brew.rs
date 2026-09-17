@@ -105,16 +105,6 @@ pub fn search_parsed(
     out
 }
 
-/// Write `body` to `path` via a temp-file-then-rename, so a concurrent reader
-/// (another process, or this one under a torn write) never observes a
-/// partially written cache file. The temp file lives alongside `path` under
-/// a `.tmp` extension so the rename stays on the same filesystem.
-fn write_cache_atomic(path: &Path, body: &str) -> std::io::Result<()> {
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, body)?;
-    std::fs::rename(&tmp, path)
-}
-
 /// Return cached file content if it is under 24h old, otherwise fetch `url`,
 /// write the result to `path` atomically, and return the new content.
 /// Returns None if the fetch fails and no cached copy exists.
@@ -138,7 +128,7 @@ fn cached_or_fetch(path: &Path, url: &str) -> Option<String> {
     match crate::http::get(url) {
         Ok(body) => {
             // Best-effort write; if it fails the caller still gets the body.
-            let _ = write_cache_atomic(path, &body);
+            let _ = crate::cache::write_atomic(path, &body);
             Some(body)
         }
         Err(_) => {
@@ -350,19 +340,6 @@ mod tests {
         ));
         let _ = std::fs::create_dir_all(&dir);
         dir
-    }
-
-    #[test]
-    fn write_cache_atomic_leaves_no_tmp_file_behind() {
-        let dir = scratch_dir("atomic-write");
-        let path = dir.join("cache.json");
-
-        write_cache_atomic(&path, "hello").unwrap();
-
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello");
-        assert!(!path.with_extension("tmp").exists());
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

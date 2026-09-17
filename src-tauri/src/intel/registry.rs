@@ -57,16 +57,6 @@ fn disk_path(eco: &str, pkg: &str, cache_dir: &Path) -> PathBuf {
     ))
 }
 
-/// Write via a sibling temp file plus rename, atomic on the same filesystem
-/// (same pattern as store.rs's write_json: readers always see a complete old
-/// or new file, never a partial write from a crash mid-write).
-fn write_disk(path: &Path, body: &str) {
-    let tmp = path.with_extension("json.tmp");
-    if std::fs::write(&tmp, body).is_ok() {
-        let _ = std::fs::rename(&tmp, path);
-    }
-}
-
 /// The registry document URL for (eco, pkg), or None when the ecosystem has
 /// no registry document endpoint this cache knows how to fetch.
 fn url_for(eco: &str, pkg: &str) -> Option<String> {
@@ -130,7 +120,7 @@ fn doc_with(
     // 3. Network, with a stale-disk fallback on failure.
     match fetch(&url) {
         Ok(body) => {
-            write_disk(&path, &body);
+            let _ = crate::cache::write_atomic(&path, &body);
             memory_put(&key, &body);
             Some(body)
         }
