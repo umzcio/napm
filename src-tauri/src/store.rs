@@ -563,4 +563,59 @@ mod tests {
         migrate_legacy(&current, &legacy); // must not panic
         assert!(!current.join("history.json").exists());
     }
+
+    #[test]
+    fn history_is_capped_at_500_newest() {
+        let s = temp_store();
+        for i in 0..505 {
+            s.add_history(HistoryEntry {
+                ts: i,
+                pkg: format!("pkg{}", i),
+                eco: "npm".into(),
+                action: "install".into(),
+                from: None,
+                to: "1.0".into(),
+            })
+            .unwrap();
+        }
+        let h = s.history();
+        assert_eq!(h.len(), 500);
+        assert_eq!(h[0].ts, 504); // newest first
+        assert_eq!(h[499].ts, 5); // oldest 5 dropped
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn settings_tmp_file_is_owner_only_from_creation() {
+        use std::os::unix::fs::PermissionsExt;
+        let s = temp_store();
+        s.set_settings(&Settings {
+            github_token: "secret-token".into(),
+            sources: Sources::default(),
+            probe_manual: true,
+            advisory_checks: true,
+        })
+        .unwrap();
+        // A successful write renames the temp file away; none is left behind.
+        assert!(!s.dir_for_test().join("settings.json.tmp").exists());
+        let perm = std::fs::metadata(s.dir_for_test().join("settings.json"))
+            .unwrap()
+            .permissions();
+        assert_eq!(perm.mode() & 0o777, 0o600);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn write_failure_propagates() {
+        use std::os::unix::fs::PermissionsExt;
+        let s = temp_store();
+        let dir = s.dir_for_test();
+        // A read-only store dir makes the tmp-file creation fail.
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let result = s.set_pin("typescript", true);
+        // Restore write permission before asserting so the tempdir cleans up.
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(result.is_err());
+        assert!(s.pins().is_empty());
+    }
 }
