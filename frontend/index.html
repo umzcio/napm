@@ -1586,7 +1586,7 @@
       // Rescan only after the settings are persisted, so the scan reads the new sources.
       var after=function(){ FEED_LOADED=false; scanLibrary(); };
       var i=inv();
-      if(i) i("set_settings",{settings:settings}).then(after).catch(after); else after();
+      if(i) call("set_settings",{settings:settings}).then(after,after); else after();
       return;
     }
     if(e.target.hasAttribute("data-update-now")){
