@@ -1065,16 +1065,20 @@
 
   var DID_UPDATE_CHECK=false;
   var NPX_DRIFT={}; // npx pkg -> registry latest, only when it differs from the cached version
+  var scanSeq=0; // last scan wins: an older in-flight scan must not overwrite a newer one
   function scanLibrary(){
     if(!inv()){ renderRows(); FEED_LOADED=false; loadWhatsNew(); renderStatus(); dismissSplash(); return; }
+    var seq=++scanSeq;
     call("scan_installed").then(function(tools){
+      if(seq!==scanSeq) return;
       TOOLS = tools || [];
       SCAN_FAILED=false;
       selected=null; // the old index no longer maps into the rebuilt list
-      renderRows(); annotateNpxDrift(); FEED_LOADED=false; loadWhatsNew(); renderStatus(); dismissSplash();
+      renderRows(); annotateNpxDrift(seq); FEED_LOADED=false; loadWhatsNew(); renderStatus(); dismissSplash();
       // Once per session, after the UI settles, check for an app update unobtrusively.
       if(!DID_UPDATE_CHECK){ DID_UPDATE_CHECK=true; setTimeout(function(){ checkForUpdate(false); }, 1200); }
     }).catch(function(e){
+      if(seq!==scanSeq) return;
       console.error("scan_installed failed", e);
       SCAN_FAILED=true;
       renderRows(); FEED_LOADED=false; loadWhatsNew(); renderStatus(); dismissSplash();
@@ -1082,11 +1086,12 @@
   }
   // After the library renders, resolve registry latest for npx tools and flag
   // any whose cached version differs (npx re-resolves @latest on next run).
-  function annotateNpxDrift(){
+  function annotateNpxDrift(seq){
     var i=inv(); if(!i) return;
     var pkgs=TOOLS.filter(function(t){return t.eco==="npx";}).map(function(t){return t.pkg;});
     if(!pkgs.length) return;
     i("npx_latest",{pkgs:pkgs}).then(function(rows){
+      if(seq!==scanSeq) return; // a newer scan owns TOOLS/NPX_DRIFT now
       NPX_DRIFT={}; // reset so a tool that no longer drifts loses its stale hint
       (rows||[]).forEach(function(r){
         var t=TOOLS.find(function(x){return x.eco==="npx"&&x.pkg===r.pkg;});
