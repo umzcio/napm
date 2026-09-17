@@ -289,9 +289,9 @@ fn velocity_verdict(
     cache_dir: &Path,
 ) -> Option<(String, String)> {
     // Cache (12h TTL) so velocity is re-checked through the fresh window.
-    let safe_eco = eco.replace(['/', '\\'], "_").replace("..", "_");
-    let safe_pkg = pkg.replace(['/', '@', '\\'], "_").replace("..", "_");
-    let safe_ver = version.replace(['/', '\\'], "_").replace("..", "_");
+    let safe_eco = crate::cache::sanitize_key(eco);
+    let safe_pkg = crate::cache::sanitize_key(pkg);
+    let safe_ver = crate::cache::sanitize_key(version);
     let cache_file = cache_dir.join(format!("hold_{}_{}_{}.json", safe_eco, safe_pkg, safe_ver));
     if let Ok(s) = std::fs::read_to_string(&cache_file) {
         if let Ok(c) = serde_json::from_str::<HoldCache>(&s) {
@@ -367,9 +367,9 @@ fn velocity_verdict(
 pub fn changelog(eco: &str, pkg: &str, version: &str, cache_dir: &Path) -> Vec<String> {
     // Build a filesystem-safe cache key. Sanitize eco, pkg, and version to
     // prevent path traversal via frontend-supplied strings.
-    let safe_eco = eco.replace(['/', '\\'], "_").replace("..", "_");
-    let safe_pkg = pkg.replace(['/', '@', '\\'], "_").replace("..", "_");
-    let safe_ver = version.replace(['/', '\\'], "_").replace("..", "_");
+    let safe_eco = crate::cache::sanitize_key(eco);
+    let safe_pkg = crate::cache::sanitize_key(pkg);
+    let safe_ver = crate::cache::sanitize_key(version);
     let cache_file = cache_dir.join(format!(
         "changelog_{}_{}_{}.json",
         safe_eco, safe_pkg, safe_ver

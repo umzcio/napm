@@ -1,3 +1,4 @@
+mod cache;
 mod http;
 mod importer;
 mod intel;
@@ -142,7 +143,7 @@ fn export_library(
         .unwrap_or_else(|_| std::path::PathBuf::from("."));
     let _ = std::fs::create_dir_all(&dir);
     // Sanitize the frontend-supplied filename: no path separators or traversal.
-    let safe = filename.replace(['/', '\\'], "_").replace("..", "_");
+    let safe = cache::sanitize_key(&filename);
     let path = dir.join(safe);
     std::fs::write(&path, content).map_err(|e| e.to_string())?;
     // -R reveals and selects the new file in Finder.

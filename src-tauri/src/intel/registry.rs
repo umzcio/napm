@@ -49,15 +49,12 @@ fn memory_put(key: &DocKey, body: &str) {
     }
 }
 
-/// Sanitize a key fragment for use in a filename: no path separators, no
-/// traversal. Mirrors the pattern already used for the changelog/hold caches
-/// in intel/release.rs.
-fn sanitize(s: &str) -> String {
-    s.replace(['/', '@', '\\'], "_").replace("..", "_")
-}
-
 fn disk_path(eco: &str, pkg: &str, cache_dir: &Path) -> PathBuf {
-    cache_dir.join(format!("regdoc_{}_{}.json", sanitize(eco), sanitize(pkg)))
+    cache_dir.join(format!(
+        "regdoc_{}_{}.json",
+        crate::cache::sanitize_key(eco),
+        crate::cache::sanitize_key(pkg)
+    ))
 }
 
 /// Write via a sibling temp file plus rename, atomic on the same filesystem
