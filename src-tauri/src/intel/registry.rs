@@ -124,9 +124,14 @@ fn doc_with(
             memory_put(&key, &body);
             Some(body)
         }
-        Err(_) => std::fs::read_to_string(&path).ok().inspect(|body| {
-            memory_put(&key, body);
-        }),
+        // A stale fallback serves this call but must not suppress the next
+        // call's retry, so it is NOT put into memory (which would stamp a
+        // fresh Instant and hide the outage for the whole TTL). With no
+        // memory entry the next call re-attempts the fetch once (bounded by
+        // the 6s read timeout in http.rs), matching the no-cache-at-all
+        // behavior. The asymmetry is intended: fresh data recovers
+        // immediately when connectivity returns.
+        Err(_) => std::fs::read_to_string(&path).ok(),
     }
 }
 
