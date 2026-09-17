@@ -681,17 +681,15 @@
       // Build FEED items (cards) from alerts first, then verdicts.
       var feed=[];
       (r.alerts||[]).forEach(function(a){
-        var ti=findToolIdx(a.pkg, a.eco);
         var mal=a.severity==="malicious";
-        feed.push({ti:ti, pkg:a.pkg, eco:a.eco, rec:(mal?"malicious":"security"),
+        feed.push({pkg:a.pkg, eco:a.eco, rec:(mal?"malicious":"security"),
           id:a.id, severity:a.severity, age:"security advisory",
           blurb:a.summary||(mal?"A compromised version is installed.":"A security advisory affects your installed version."),
           changelog:[], loaded:false, detailLoaded:mal,
           fix:a.fixedVersion||null, link:a.link||""});
       });
       (r.verdicts||[]).forEach(function(v){
-        var ti=findToolIdx(v.pkg, v.eco);
-        feed.push({ti:ti, pkg:v.pkg, eco:v.eco, rec:v.recommendation, reason:v.reason||"",
+        feed.push({pkg:v.pkg, eco:v.eco, rec:v.recommendation, reason:v.reason||"",
           age:v.ageLabel||"signal unknown", blurb:reBlurb(v), changelog:[], loaded:false,
           signals:[], fix:null, link:""});
       });
@@ -732,16 +730,17 @@
       return;
     }
     FEED.forEach(function(it,idx){
-      var nm=it.ti>=0?TOOLS[it.ti].name:it.pkg;
-      var verline=it.ti>=0&&TOOLS[it.ti].installed?h`${TOOLS[it.ti].installed} \u2192 ${it.fix||TOOLS[it.ti].latest}`:h`${it.fix||""}`;
+      var ti=findToolIdx(it.pkg, it.eco); // re-resolve: TOOLS may have been rebuilt since the feed loaded
+      var nm=ti>=0?TOOLS[ti].name:it.pkg;
+      var verline=ti>=0&&TOOLS[ti].installed?h`${TOOLS[ti].installed} \u2192 ${it.fix||TOOLS[ti].latest}`:h`${it.fix||""}`;
       var r=REC[it.rec]||REC["new"];
       var isAlert=!!it.id;
-      var actLabel = it.fix?("Get "+it.fix):(it.ti>=0?("Get "+TOOLS[it.ti].latest):"Get");
+      var actLabel = it.fix?("Get "+it.fix):(ti>=0?("Get "+TOOLS[ti].latest):"Get");
       var act = (it.rec==="malicious"&&it.detailLoaded&&!it.fix)
         ? h`<div class="signal danger mt8">No safe version published.`+
-          (it.ti>=0?h` <button class="btn danger rowbtn blockbtn" data-uninstallfeed="${idx}">Uninstall</button>`:'')+
+          (ti>=0?h` <button class="btn danger rowbtn blockbtn" data-uninstallfeed="${idx}">Uninstall</button>`:'')+
           h`<div class="muted mt6">or run: <code>${removeCmd(it)}</code></div></div>`
-        : (it.ti>=0?h`<button class="btn rowbtn mt8" data-getfeed="${idx}">${actLabel}</button>`:'');
+        : (ti>=0?h`<button class="btn rowbtn mt8" data-getfeed="${idx}">${actLabel}</button>`:'');
       var body;
       if(isAlert){
         var txt = it.fix ? h`fixed in ${it.fix}`
@@ -826,16 +825,16 @@
           }).catch(function(){ it.detailFailed=true; it.detailLoaded=true; renderFeed(); });
         } else if(!it.id){
           // verdict card: lazy-load the changelog
-          var ver=it.fix||(it.ti>=0?TOOLS[it.ti].latest:it.pkg);
+          var ti=findToolIdx(it.pkg,it.eco); var ver=it.fix||(ti>=0?TOOLS[ti].latest:it.pkg);
           call("get_changelog",{eco:it.eco,pkg:it.pkg,version:ver}).then(function(log){ it.changelog=log||[]; it.loaded=true; renderFeed(); }).catch(function(){ it.loadFailed=true; renderFeed(); });
         }
       }
       return;
     }
     var g=e.target.closest("[data-getfeed]");
-    if(g){ var it2=FEED[+g.dataset.getfeed]; if(it2 && it2.ti>=0){ queueTransfer(TOOLS[it2.ti], it2.fix||TOOLS[it2.ti].latest, "update"); switchTab("transfers"); } return; }
+    if(g){ var it2=FEED[+g.dataset.getfeed]; if(it2){ var ti=findToolIdx(it2.pkg, it2.eco); if(ti>=0){ queueTransfer(TOOLS[ti], it2.fix||TOOLS[ti].latest, "update"); switchTab("transfers"); } } return; }
     var u=e.target.closest("[data-uninstallfeed]");
-    if(u){ var it3=FEED[+u.dataset.uninstallfeed]; if(it3 && it3.ti>=0) showUninstallConfirm(TOOLS[it3.ti]); }
+    if(u){ var it3=FEED[+u.dataset.uninstallfeed]; if(it3){ var ti=findToolIdx(it3.pkg, it3.eco); if(ti>=0) showUninstallConfirm(TOOLS[ti]); } }
   });
 
   // ---- TRANSFERS ---------------------------------------------------------
