@@ -448,14 +448,18 @@ pub fn run_op(
         let success = status.map(|s| s.success()).unwrap_or(false);
 
         if success {
-            store.add_history(HistoryEntry {
+            // The op itself succeeded, so a history-write failure must not
+            // flip the reported outcome, but it must not be silent either.
+            if let Err(e) = store.add_history(HistoryEntry {
                 ts,
                 pkg,
                 eco,
                 action,
                 from,
                 to,
-            });
+            }) {
+                log::warn!("op succeeded but history write failed: {e}");
+            }
         }
         let _ = app.emit(
             "transfer-done",

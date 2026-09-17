@@ -8,6 +8,10 @@ use std::sync::Mutex;
 /// rather than a per-instance lock to actually serialize concurrent callers.
 static STORE_LOCK: Mutex<()> = Mutex::new(());
 
+/// Bounds history.json size and the get_history payload; 500 is far beyond
+/// any real session count.
+const HISTORY_CAP: usize = 500;
+
 /// One logged version change. Mirrors the prototype's HistoryEntry, plus `eco`
 /// so rollback can rebuild the command.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -117,26 +121,38 @@ impl Store {
 
     /// Writes via a sibling temp file plus rename, which is atomic on the same
     /// filesystem: readers always see a complete old or new file, never a
-    /// partial write from a crash mid-write.
-    fn write_json<T: Serialize>(path: &Path, value: &T) {
-        if let Ok(s) = serde_json::to_string_pretty(value) {
-            let tmp = path.with_extension("json.tmp");
-            if std::fs::write(&tmp, s).is_ok() {
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
-                }
-                let _ = std::fs::rename(&tmp, path);
+    /// partial write from a crash mid-write. The temp file is created 0600 so
+    /// a secret-bearing settings.json is never world-readable, even mid-write
+    /// or after a crash.
+    fn write_json<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
+        let s = serde_json::to_string_pretty(value)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let tmp = path.with_extension("json.tmp");
+        {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                let mut f = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .mode(0o600)
+                    .open(&tmp)?;
+                std::io::Write::write_all(&mut f, s.as_bytes())?;
+            }
+            #[cfg(not(unix))]
+            {
+                std::fs::write(&tmp, &s)?;
             }
         }
+        std::fs::rename(&tmp, path)
     }
 
     pub fn pins(&self) -> BTreeSet<String> {
         Self::read_json(&self.pins_path())
     }
 
-    pub fn set_pin(&self, pkg: &str, on: bool) {
+    pub fn set_pin(&self, pkg: &str, on: bool) -> std::io::Result<()> {
         let _g = STORE_LOCK.lock().unwrap();
         let mut pins = self.pins();
         if on {
@@ -144,7 +160,7 @@ impl Store {
         } else {
             pins.remove(pkg);
         }
-        Self::write_json(&self.pins_path(), &pins);
+        Self::write_json(&self.pins_path(), &pins)
     }
 
     /// History newest-first.
@@ -154,11 +170,13 @@ impl Store {
         h
     }
 
-    pub fn add_history(&self, entry: HistoryEntry) {
+    pub fn add_history(&self, entry: HistoryEntry) -> std::io::Result<()> {
         let _g = STORE_LOCK.lock().unwrap();
         let mut h: Vec<HistoryEntry> = Self::read_json(&self.history_path());
         h.push(entry);
-        Self::write_json(&self.history_path(), &h);
+        h.sort_by_key(|e| std::cmp::Reverse(e.ts));
+        h.truncate(HISTORY_CAP);
+        Self::write_json(&self.history_path(), &h)
     }
 
     fn settings_path(&self) -> PathBuf {
@@ -169,9 +187,9 @@ impl Store {
         Self::read_json(&self.settings_path())
     }
 
-    pub fn set_settings(&self, s: &Settings) {
+    pub fn set_settings(&self, s: &Settings) -> std::io::Result<()> {
         let _g = STORE_LOCK.lock().unwrap();
-        Self::write_json(&self.settings_path(), s);
+        Self::write_json(&self.settings_path(), s)
     }
 
     /// The app-data directory this store is rooted at. Used by callers (e.g.
@@ -222,12 +240,12 @@ mod tests {
     fn pins_round_trip_and_dedupe() {
         let s = temp_store();
         assert!(s.pins().is_empty());
-        s.set_pin("typescript", true);
-        s.set_pin("typescript", true); // idempotent
-        s.set_pin("eslint", true);
+        s.set_pin("typescript", true).unwrap();
+        s.set_pin("typescript", true).unwrap(); // idempotent
+        s.set_pin("eslint", true).unwrap();
         let pins = s.pins();
         assert!(pins.contains("typescript") && pins.contains("eslint") && pins.len() == 2);
-        s.set_pin("typescript", false);
+        s.set_pin("typescript", false).unwrap();
         assert!(!s.pins().contains("typescript"));
     }
 
@@ -242,7 +260,8 @@ mod tests {
             action: "install".into(),
             from: None,
             to: "1.0".into(),
-        });
+        })
+        .unwrap();
         s.add_history(HistoryEntry {
             ts: 2,
             pkg: "b".into(),
@@ -250,7 +269,8 @@ mod tests {
             action: "update".into(),
             from: Some("1.0".into()),
             to: "2.0".into(),
-        });
+        })
+        .unwrap();
         let h = s.history();
         assert_eq!(h.len(), 2);
         assert_eq!(h[0].pkg, "b"); // newest first
@@ -267,7 +287,8 @@ mod tests {
             action: "remove".into(),
             from: Some("1.6.0".into()),
             to: String::new(),
-        });
+        })
+        .unwrap();
         let h = s.history();
         assert_eq!(h.len(), 1);
         assert_eq!(h[0].action, "remove");
@@ -295,7 +316,8 @@ mod tests {
             action: "install".into(),
             from: None,
             to: "1.0".into(),
-        });
+        })
+        .unwrap();
         let h = s.history();
         assert_eq!(h.len(), 1);
         assert_eq!(h[0].pkg, "a");
@@ -317,7 +339,8 @@ mod tests {
                         action: "install".into(),
                         from: None,
                         to: "1.0".into(),
-                    });
+                    })
+                    .unwrap();
                 })
             })
             .collect();
@@ -352,7 +375,8 @@ mod tests {
             },
             probe_manual: false,
             advisory_checks: false,
-        });
+        })
+        .unwrap();
         let got = s.settings();
         assert_eq!(got.github_token, "abc");
         assert!(!got.sources.brew);
@@ -372,7 +396,8 @@ mod tests {
             sources: Sources::default(),
             probe_manual: true,
             advisory_checks: true,
-        });
+        })
+        .unwrap();
         let perm = std::fs::metadata(s.dir_for_test().join("settings.json"))
             .unwrap()
             .permissions();
