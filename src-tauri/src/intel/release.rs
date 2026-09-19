@@ -289,9 +289,9 @@ fn velocity_verdict(
     cache_dir: &Path,
 ) -> Option<(String, String)> {
     // Cache (12h TTL) so velocity is re-checked through the fresh window.
-    let safe_eco = eco.replace(['/', '\\'], "_").replace("..", "_");
-    let safe_pkg = pkg.replace(['/', '@', '\\'], "_").replace("..", "_");
-    let safe_ver = version.replace(['/', '\\'], "_").replace("..", "_");
+    let safe_eco = crate::cache::sanitize_key(eco);
+    let safe_pkg = crate::cache::sanitize_key(pkg);
+    let safe_ver = crate::cache::sanitize_key(version);
     let cache_file = cache_dir.join(format!("hold_{}_{}_{}.json", safe_eco, safe_pkg, safe_ver));
     if let Ok(s) = std::fs::read_to_string(&cache_file) {
         if let Ok(c) = serde_json::from_str::<HoldCache>(&s) {
@@ -352,7 +352,7 @@ fn velocity_verdict(
         recommendation: rec.clone(),
         reason: reason.clone(),
     }) {
-        let _ = std::fs::write(&cache_file, s);
+        let _ = crate::cache::write_atomic(&cache_file, &s);
     }
     if rec == "hold" {
         Some((rec, reason))
@@ -361,24 +361,49 @@ fn velocity_verdict(
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct ChangelogCache {
+    checked_ts: i64,
+    lines: Vec<String>,
+}
+
+/// Whether a cached changelog entry counts as a hit. Non-empty results are
+/// permanent (release notes for a published version do not change); empty
+/// results expire after an hour so a release published after our first
+/// lookup, or a tag shape we did not match, is retried.
+fn changelog_cache_hit(lines: &[String], checked_ts: i64, now: i64) -> bool {
+    !lines.is_empty() || now - checked_ts < 3600
+}
+
 /// Fetch and cache the GitHub changelog for (eco, pkg, version).
-/// Cache is permanent (one write per unique version). Any failure returns
-/// Vec::new(). Caches empty results too, to avoid re-hitting a rate limit.
+/// Non-empty results are cached permanently (one write per unique version);
+/// empty results are cached for 1h so a later-published release or an
+/// unmatched tag shape self-heals. Any failure returns Vec::new() and is
+/// not cached.
 pub fn changelog(eco: &str, pkg: &str, version: &str, cache_dir: &Path) -> Vec<String> {
     // Build a filesystem-safe cache key. Sanitize eco, pkg, and version to
     // prevent path traversal via frontend-supplied strings.
-    let safe_eco = eco.replace(['/', '\\'], "_").replace("..", "_");
-    let safe_pkg = pkg.replace(['/', '@', '\\'], "_").replace("..", "_");
-    let safe_ver = version.replace(['/', '\\'], "_").replace("..", "_");
+    let safe_eco = crate::cache::sanitize_key(eco);
+    let safe_pkg = crate::cache::sanitize_key(pkg);
+    let safe_ver = crate::cache::sanitize_key(version);
     let cache_file = cache_dir.join(format!(
         "changelog_{}_{}_{}.json",
         safe_eco, safe_pkg, safe_ver
     ));
 
-    // Return cached result if it exists (permanent cache per version).
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+
+    // Return the cached result on a hit. Legacy Vec<String> files (written
+    // before the timestamped format) fail to parse as ChangelogCache and are
+    // treated as a miss: one refetch per old entry, which is acceptable.
     if let Ok(s) = std::fs::read_to_string(&cache_file) {
-        if let Ok(v) = serde_json::from_str::<Vec<String>>(&s) {
-            return v;
+        if let Ok(c) = serde_json::from_str::<ChangelogCache>(&s) {
+            if changelog_cache_hit(&c.lines, c.checked_ts, now) {
+                return c.lines;
+            }
         }
     }
 
@@ -433,10 +458,14 @@ pub fn changelog(eco: &str, pkg: &str, version: &str, cache_dir: &Path) -> Vec<S
 
     match fetch_result {
         Ok(result) => {
-            // Successful HTTP response: cache even if no matching release notes were
-            // found (a legitimate empty result), to avoid hammering the API.
-            if let Ok(s) = serde_json::to_string(&result) {
-                let _ = std::fs::write(&cache_file, s);
+            // Successful HTTP response: cache even when no matching release
+            // notes were found (a legitimate empty result), to avoid hammering
+            // the API. Empty results carry a 1h TTL via changelog_cache_hit.
+            if let Ok(s) = serde_json::to_string(&ChangelogCache {
+                checked_ts: now,
+                lines: result.clone(),
+            }) {
+                let _ = crate::cache::write_atomic(&cache_file, &s);
             }
             result
         }
@@ -451,6 +480,20 @@ pub fn changelog(eco: &str, pkg: &str, version: &str, cache_dir: &Path) -> Vec<S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn changelog_cache_hit_rules() {
+        let lines = vec!["Fixed a bug".to_string()];
+        let empty: Vec<String> = Vec::new();
+        let now = 1_000_000;
+        // Non-empty results are a permanent hit at any age.
+        assert!(changelog_cache_hit(&lines, 0, now));
+        assert!(changelog_cache_hit(&lines, now, now));
+        // Empty results hit only within the 1h TTL.
+        assert!(changelog_cache_hit(&empty, now - 59 * 60, now));
+        assert!(!changelog_cache_hit(&empty, now - 61 * 60, now));
+        assert!(!changelog_cache_hit(&empty, 0, now));
+    }
 
     #[test]
     fn iso_parses_known_epochs() {

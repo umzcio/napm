@@ -105,20 +105,13 @@ pub fn search_parsed(
     out
 }
 
-/// Write `body` to `path` via a temp-file-then-rename, so a concurrent reader
-/// (another process, or this one under a torn write) never observes a
-/// partially written cache file. The temp file lives alongside `path` under
-/// a `.tmp` extension so the rename stays on the same filesystem.
-fn write_cache_atomic(path: &Path, body: &str) -> std::io::Result<()> {
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, body)?;
-    std::fs::rename(&tmp, path)
-}
-
 /// Return cached file content if it is under 24h old, otherwise fetch `url`,
 /// write the result to `path` atomically, and return the new content.
 /// Returns None if the fetch fails and no cached copy exists.
-fn cached_or_fetch(path: &Path, url: &str) -> Option<String> {
+/// The bool reports freshness: true for a fresh network fetch or an in-TTL
+/// disk hit, false when the body came from the stale-disk fallback, so the
+/// caller can avoid restarting the freshness clock on a failed refetch.
+fn cached_or_fetch(path: &Path, url: &str) -> Option<(String, bool)> {
     let fresh = std::fs::metadata(path)
         .and_then(|m| m.modified())
         .ok()
@@ -131,19 +124,19 @@ fn cached_or_fetch(path: &Path, url: &str) -> Option<String> {
         .unwrap_or(false);
 
     if fresh {
-        return std::fs::read_to_string(path).ok();
+        return std::fs::read_to_string(path).ok().map(|body| (body, true));
     }
 
     // Stale or missing: attempt a fresh fetch.
     match crate::http::get(url) {
         Ok(body) => {
             // Best-effort write; if it fails the caller still gets the body.
-            let _ = write_cache_atomic(path, &body);
-            Some(body)
+            let _ = crate::cache::write_atomic(path, &body);
+            Some((body, true))
         }
         Err(_) => {
             // Fall back to any stale cached copy rather than returning nothing.
-            std::fs::read_to_string(path).ok()
+            std::fs::read_to_string(path).ok().map(|body| (body, false))
         }
     }
 }
@@ -231,7 +224,7 @@ fn load_catalog(cache_dir: &Path) -> Option<CatalogAndAnalytics> {
     }
 
     let catalog_path = cache_dir.join("brew_catalog.json");
-    let catalog_json = cached_or_fetch(&catalog_path, CATALOG_URL)?;
+    let (catalog_json, mut fresh) = cached_or_fetch(&catalog_path, CATALOG_URL)?;
     let mut formulae = parse_catalog(&catalog_json);
     if catalog_is_corrupt(&formulae) {
         // The disk copy may be corrupt or torn (e.g. an interleaved write
@@ -240,7 +233,8 @@ fn load_catalog(cache_dir: &Path) -> Option<CatalogAndAnalytics> {
         // and retry once so a bad file doesn't keep returning zero brew
         // results for the rest of its 24h freshness window.
         let _ = std::fs::remove_file(&catalog_path);
-        let catalog_json = cached_or_fetch(&catalog_path, CATALOG_URL)?;
+        let (catalog_json, retry_fresh) = cached_or_fetch(&catalog_path, CATALOG_URL)?;
+        fresh = retry_fresh;
         formulae = parse_catalog(&catalog_json);
     }
 
@@ -248,15 +242,24 @@ fn load_catalog(cache_dir: &Path) -> Option<CatalogAndAnalytics> {
         &cache_dir.join("brew_analytics.json"),
         "https://formulae.brew.sh/api/analytics/install/30d.json",
     )
-    .map(|s| parse_analytics(&s))
+    .map(|(s, _)| parse_analytics(&s))
     .unwrap_or_default();
 
     let formulae = Arc::new(formulae);
     let analytics = Arc::new(analytics_map);
 
+    // A stale-fallback catalog must not restart the 24h clock: stamp the
+    // entry as already expired so the next search refetches instead of
+    // reading a failed refetch as fresh for a full day.
+    let loaded = if fresh {
+        SystemTime::now()
+    } else {
+        SystemTime::now() - Duration::from_secs(24 * 60 * 60)
+    };
+
     let mut guard = catalog_cell().lock().unwrap();
     *guard = Some(CatalogCache {
-        loaded: SystemTime::now(),
+        loaded,
         formulae: formulae.clone(),
         analytics: analytics.clone(),
     });
@@ -353,19 +356,6 @@ mod tests {
     }
 
     #[test]
-    fn write_cache_atomic_leaves_no_tmp_file_behind() {
-        let dir = scratch_dir("atomic-write");
-        let path = dir.join("cache.json");
-
-        write_cache_atomic(&path, "hello").unwrap();
-
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello");
-        assert!(!path.with_extension("tmp").exists());
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
     fn cached_or_fetch_short_circuits_to_disk_when_fresh_even_if_corrupt() {
         // A file just written has a fresh mtime, so cached_or_fetch must
         // return its content straight from disk without touching the
@@ -375,7 +365,25 @@ mod tests {
         std::fs::write(&path, "not valid json").unwrap();
 
         let got = cached_or_fetch(&path, "http://127.0.0.1:1/unreachable");
-        assert_eq!(got.as_deref(), Some("not valid json"));
+        assert_eq!(got, Some(("not valid json".to_string(), true)));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stale_disk_fallback_reports_not_fresh() {
+        let dir = scratch_dir("stale-fallback");
+        let path = dir.join("catalog.json");
+        std::fs::write(&path, "stale body").unwrap();
+        // Backdate past the 24h TTL so the fetch is attempted.
+        let f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        f.set_modified(SystemTime::now() - Duration::from_secs(48 * 60 * 60))
+            .unwrap();
+
+        // The fetch fails fast (connection refused), so the stale disk body
+        // is served but must report fresh == false.
+        let got = cached_or_fetch(&path, "http://127.0.0.1:1/unreachable");
+        assert_eq!(got, Some(("stale body".to_string(), false)));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -49,25 +49,12 @@ fn memory_put(key: &DocKey, body: &str) {
     }
 }
 
-/// Sanitize a key fragment for use in a filename: no path separators, no
-/// traversal. Mirrors the pattern already used for the changelog/hold caches
-/// in intel/release.rs.
-fn sanitize(s: &str) -> String {
-    s.replace(['/', '@', '\\'], "_").replace("..", "_")
-}
-
 fn disk_path(eco: &str, pkg: &str, cache_dir: &Path) -> PathBuf {
-    cache_dir.join(format!("regdoc_{}_{}.json", sanitize(eco), sanitize(pkg)))
-}
-
-/// Write via a sibling temp file plus rename, atomic on the same filesystem
-/// (same pattern as store.rs's write_json: readers always see a complete old
-/// or new file, never a partial write from a crash mid-write).
-fn write_disk(path: &Path, body: &str) {
-    let tmp = path.with_extension("json.tmp");
-    if std::fs::write(&tmp, body).is_ok() {
-        let _ = std::fs::rename(&tmp, path);
-    }
+    cache_dir.join(format!(
+        "regdoc_{}_{}.json",
+        crate::cache::sanitize_key(eco),
+        crate::cache::sanitize_key(pkg)
+    ))
 }
 
 /// The registry document URL for (eco, pkg), or None when the ecosystem has
@@ -133,13 +120,18 @@ fn doc_with(
     // 3. Network, with a stale-disk fallback on failure.
     match fetch(&url) {
         Ok(body) => {
-            write_disk(&path, &body);
+            let _ = crate::cache::write_atomic(&path, &body);
             memory_put(&key, &body);
             Some(body)
         }
-        Err(_) => std::fs::read_to_string(&path).ok().inspect(|body| {
-            memory_put(&key, body);
-        }),
+        // A stale fallback serves this call but must not suppress the next
+        // call's retry, so it is NOT put into memory (which would stamp a
+        // fresh Instant and hide the outage for the whole TTL). With no
+        // memory entry the next call re-attempts the fetch once (bounded by
+        // the 6s read timeout in http.rs), matching the no-cache-at-all
+        // behavior. The asymmetry is intended: fresh data recovers
+        // immediately when connectivity returns.
+        Err(_) => std::fs::read_to_string(&path).ok(),
     }
 }
 
@@ -207,6 +199,44 @@ mod tests {
             &dir,
         );
         assert_eq!(result.as_deref(), Some("old-content"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stale_fallback_does_not_suppress_the_next_calls_retry() {
+        let dir =
+            std::env::temp_dir().join(format!("napm_regdoc_test_retry_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = disk_path("npm", "retry-pkg", &dir);
+        std::fs::write(&path, "old-content").unwrap();
+        // Backdate the file's mtime past the TTL so the disk layer is stale.
+        let f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        f.set_modified(std::time::SystemTime::now() - Duration::from_secs(7200))
+            .unwrap();
+
+        // Outage: the stale disk body serves this call...
+        let result = doc_with(
+            |_url| Err("network down".to_string()),
+            "npm",
+            "retry-pkg",
+            &dir,
+        );
+        assert_eq!(result.as_deref(), Some("old-content"));
+
+        // ...but the stale body must not be put into memory with a fresh
+        // timestamp: the very next call re-attempts the fetch, and the fresh
+        // body wins and gets cached.
+        let result = doc_with(
+            |_url| Ok(r#"{"recovered":true}"#.to_string()),
+            "npm",
+            "retry-pkg",
+            &dir,
+        );
+        assert_eq!(result.as_deref(), Some(r#"{"recovered":true}"#));
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            r#"{"recovered":true}"#
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
