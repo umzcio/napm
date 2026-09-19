@@ -21,6 +21,28 @@ BUILD plans generated from the three greenlit designs; they target the post-PR-#
 codebase and are gated on that PR merging. Each executor: read the plan
 fully before starting, honor its STOP conditions, and update your row when done.
 
+**Audit round 3 (2026-09-16, commit `3df72f5`):** fresh standard-depth audit
+(four parallel category passes, every finding vetted against the live code by
+the advisor). Round 3 added plans **036-043**. The codebase was quiet since
+round 2 (only the 034/035 CSP fixes and version bumps), so most findings are
+residual classes the first two rounds did not cover: silent store write
+failures, frontend async-identity races, eco-blind package matching, and
+cache-layer hygiene. Smaller confirmed findings are recorded under "Round-3
+findings recorded, not yet planned" below.
+
+**Round 3 executed (2026-09-16):** all eight plans (036-043) executed by
+executor subagents in isolated worktrees and reviewed against their done
+criteria (every gate re-run by the reviewer). Two plans were revised
+mid-flight on correct executor STOPs: 041 (CLAUDE.md is gitignored by
+design, so the brief was archived to a tracked file and the thin CLAUDE.md
+stays local) and 043 (the empty-latest sentinel turned out to be
+load-bearing for registry-row selection; `resolve_latest` now selects by
+`CrateSource`). Two independent chains exist: `advisor/037-store-write-honesty`
+← `advisor/042-intel-cache-hygiene`, and `advisor/038-frontend-stale-guards`
+← `039` ← `040` ← `043`; 036 and 041 are standalone off `3df72f5`. GUI
+verification items are noted per-row as pending human QA. Merging is the
+maintainer's decision; nothing has been merged or pushed.
+
 All plans are written for an executor with zero prior context. Verification gate
 for every Rust-touching plan: `cd src-tauri && cargo test` (81 tests at planning
 time). Frontend changes are verified by running the app (`npm run tauri dev`),
@@ -64,6 +86,14 @@ per CONTRIBUTING.
 | 033 | Bump script must cover package-lock.json | P2 | S | — | DONE (merged as PR #14 @ f952a13; guard verified in the failing direction) |
 | 034 | CSP blocks the app's own font fetch | P1 | S | — | DONE (merged as PR #16; shipped in v0.1.7) |
 | 035 | Tauri's style nonce disables every inline style attribute | P1 | M | — | DONE (merged as PR #15; shipped in v0.1.7 and confirmed in the packaged build by the maintainer. v0.1.5/v0.1.6 were dimmed and unclickable) |
+| 036 | CSP parity check in CI (no third CSP defect ships) | P1 | M | — | DONE (`advisor/036-csp-parity-check` @ 97dcdc0; both historical defect classes verified failing-then-passing) |
+| 037 | Store writes report failure, tmp file 0600 at creation, history capped | P1 | M | — | DONE (`advisor/037-store-write-honesty` @ 3fe9499; 202 tests green incl. 3 new; GUI smoke pending human QA) |
+| 038 | Frontend guards: scan sequence, FEED identity, menu identity | P1 | M | — | DONE (`advisor/038-frontend-stale-guards` @ c3daa9a; manual checklist pending human QA) |
+| 039 | Post-op row reconciliation + run_op invoke rejection path | P2 | S | 038 | DONE (`advisor/039-post-op-reconcile` @ f690668; manual matrix pending human QA) |
+| 040 | Match packages by (eco, pkg) in verdict scope and search actions | P2 | M | 038, 039 (same file; ordering only) | DONE (`advisor/040-eco-aware-identity` @ 840e897; colliding-name search check pending human QA) |
+| 041 | Documentation truth pass (CLAUDE.md archive, ROADMAP, README) | P2 | S | — | DONE (`advisor/041-docs-truth-pass` @ e91c202; plan revised mid-flight: CLAUDE.md is gitignored by design, so the brief was archived to tracked docs/design/original-brief.md and the new thin CLAUDE.md written to the maintainer's local tree, uncommitted by design) |
+| 042 | Intel cache hygiene: atomic writes, honest TTLs, one sanitizer | P2 | M | 037 | DONE (`advisor/042-intel-cache-hygiene` @ 60158f2; 206+3 tests green; GUI smoke pending human QA) |
+| 043 | Cargo rows stop printing an unverified "Latest" | P3 | S | 038, 039 (same file; ordering only) | DONE (`advisor/043-cargo-honest-latest` @ fc70a9d; plan revised after a correct STOP: the empty-latest sentinel was load-bearing, so resolve_latest now selects rows by CrateSource, not the sentinel; GUI check pending human QA) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale).
 
@@ -93,6 +123,57 @@ worth doing.
 - Plans 002/003 vs 009: 009's drift check expects 002/003's diffs; run after.
 - Direction plans (019-022) each produce a design/report document and require a
   maintainer decision before any build; 021 explicitly starts with a yes/no.
+- Round 3: 038, 039, 040, and 043 all edit `frontend/index.html`; execute in
+  the order 038 → 039 → 040 → 043 so each drift check sees the previous diffs.
+  037 and 042 both touch `src-tauri/src/lib.rs`; land 037 first. 036 and 041
+  are independent of everything.
+
+## Round-3 findings recorded, not yet planned
+
+Confirmed in the 2026-09-16 audit, real but smaller than the planned set.
+Each has enough here to write a plan quickly; batch them into one small
+hardening PR or promote individually.
+
+- **URL-encoding gaps** (security, both S): unscoped names are interpolated
+  raw into the npm bulk-downloads URL (`search/npm.rs:111-112`; the scoped
+  branch at `:128-131` does encode), and the OSV advisory id is interpolated
+  unencoded at `intel/osv.rs:193` and `:230` (the `get_advisory` command takes
+  the id from the webview). Host is fixed in both cases so there is no SSRF;
+  the fix is `http::encode` at three sites plus a test each.
+- **`version::cmp` prerelease suffixes compare lexicographically**
+  (`scan/version.rs:32-35`): `rc2` sorts ABOVE `rc10`, so an installed rc2
+  with registry rc10 reads "ahead" instead of "update". Also
+  `version.rs:48`: a >u64 numeric segment parses to 0. Low real-world
+  frequency (registries rarely put prereleases in `latest`); fix is
+  token-wise suffix comparison plus saturating parse, with the
+  characterization table at `version.rs:201-348` as the safety net.
+- **`iso_to_unix` accepts malformed dates** (`intel/release.rs:8-32`):
+  separators and month/day/hour ranges are unchecked; garbage parses to a
+  far-future time that then floors to "released today" + verdict "new"
+  instead of "unknown". Fix: validate separators and ranges, return None.
+- **`app_data_dir()` failure falls back to `.`** (`lib.rs:15-19` and seven
+  more sites): the app would silently run on an empty, unwritable store
+  rooted at the process CWD (`/` for a Dock launch). Fix: resolve once in
+  `setup`, log loudly and return `Err` from store-owning commands on
+  failure.
+- **HTTP response bodies read unbounded** (`http.rs:25,37,49`): ureq 2 reads
+  to EOF with no cap; the 6s read timeout bounds this loosely but not
+  strictly. Fix: `into_reader().take(N)` with N ≈ 64 MB (must exceed the
+  largest legitimate npm packument).
+- **`lib.rs` boundary validators untested** (`lib.rs:141` export filename
+  sanitize, `:185-190` open_external https gate, `:243-252` reveal_in_finder
+  existence gate): extract into pure functions and table-test in the style
+  of `ops.rs`'s ~15 rejection tests. (042's shared sanitizer covers the
+  `:141` copy itself; the tests are still wanted.)
+- **Drop `'unsafe-inline'` from `script-src`** (`tauri.conf.json:25`):
+  hardening, but ONLY after plan 036's checker exists and a packaged-build
+  boot test proves Tauri's runtime script injection does not depend on it.
+  Risk if wrong: the packaged app fails to boot.
+- **`scan/manual.rs` probe-cache writer** shares the write-then-chmod
+  pattern from 037 but caches no secrets; cosmetic, fix opportunistically.
+- **Unhandled-rejection console noise** on `export_library` /
+  `open_data_dir` / `clear_caches` (`frontend/index.html:1241,1246,1279`):
+  `call()` already flashes failures in the status bar; nit only.
 
 ## Findings considered and rejected (do not re-audit)
 
@@ -140,7 +221,15 @@ worth doing.
   version under "Latest" as though the registry confirmed it; (b) `libMenu`'s
   disabled "Up to date" label carries the same implication for an `ahead` row.
   Both are honest-display nits, not correctness bugs. Worth one small plan
-  together if a third instance appears.
+  together if a third instance appears. **Third instance appeared in round 3**
+  (cargo registry crates whose crates.io lookup fails,
+  `scan/cargo.rs:428-431`): all three are now planned as **plan 043**.
+- **Consolidating the three hand-rolled cache layers** (DocMap, brew
+  CatalogCache, store write_json): considered in round 3 and rejected as a
+  consolidation: each layer is individually tested and correct, and cache
+  invalidation rework is where subtle bugs breed. Plan 042 shares only the
+  write/sanitize helpers. Do not propose a unified cache module again without
+  a concrete bug driving it.
 - **What's New badge (116) not matching the status bar's outdated count (113)**:
   correct by construction. `FEED` is alerts + verdicts (`frontend/index.html:572-586`),
   so a security advisory against an already-current package adds a card without
@@ -165,3 +254,18 @@ and `frontend/index.html`; scripts, configs, docs, and git history reviewed;
 `npm audit` run (clean); `cargo audit` NOT run (tool absent — plan 001 adds it
 to CI). Not audited: `reference/scanner.js` internals beyond its packaging
 implications, icon/asset binaries, and `src-tauri/gen/` (generated).
+
+Round 3 (2026-09-16, `3df72f5`): four parallel passes (backend
+correctness/perf, security, frontend correctness/perf, tests/debt/DX/docs/
+direction) over the same surface, with all findings vetted against the live
+code by the advisor before planning. `npm audit` clean again; `cargo audit`
+still absent locally but covered by CI (push/PR + weekly cron). Direction
+pass grounded in `docs/ROADMAP.md` and `docs/design/m11-spike.md`: the M11
+MCP-connectors spike is done and costed and awaits a maintainer build/close
+decision (the redaction layer must ship first, per the spike); the M7 polish
+remainder (Save-As picker, keyboard shortcuts, mnemonics) is a cheap batch
+in the v0.1.3 pattern; the ROADMAP's npx usage-frequency entry is amended by
+plan 041 since the spike showed frequency is not observable. Not audited
+this round: `reference/scanner.js` internals, asset binaries,
+`src-tauri/gen/`, and the packaged-build runtime behavior (no release build
+was produced during the audit).
