@@ -15,6 +15,15 @@ pub struct ToolRef {
     pub latest: String,
 }
 
+/// A (pkg, eco) pair the frontend wants a release-age verdict for. Matching
+/// is on both fields: the same name on two ecosystems (npm/brew "prettier")
+/// is two different tools with two different verdicts.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ScopeRef {
+    pub pkg: String,
+    pub eco: String,
+}
+
 /// A security finding for an installed tool (Layer 1). `severity` is
 /// "malicious" (compromise/hijack) or "vulnerable" (CVE/GHSA).
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -100,14 +109,24 @@ pub fn github_token(cache_dir: &Path) -> Option<String> {
     })
 }
 
+/// Resolve each requested (pkg, eco) scope entry to its installed tool.
+/// Matching is on both fields, so a same-name package in another ecosystem
+/// never supplies the verdict.
+fn resolve_scope<'a>(scope: &[ScopeRef], installed: &'a [ToolRef]) -> Vec<&'a ToolRef> {
+    scope
+        .iter()
+        .filter_map(|s| installed.iter().find(|t| t.pkg == s.pkg && t.eco == s.eco))
+        .collect()
+}
+
 /// Run all three layers concurrently and assemble the feed payload.
-/// `verdict_scope` is the list of pkg names (matching ToolRef.pkg) the frontend
-/// wants age verdicts for. Verdicts already covered by a security alert are dropped.
+/// `verdict_scope` is the list of (pkg, eco) pairs the frontend wants age
+/// verdicts for. Verdicts already covered by a security alert are dropped.
 /// `advisories_enabled` gates only the batched OSV inventory scan (the
 /// security alerts); the wire and release-age verdicts always run regardless.
 pub fn whats_new(
     installed: &[ToolRef],
-    verdict_scope: &[String],
+    verdict_scope: &[ScopeRef],
     cache_dir: &Path,
     now: i64,
     advisories_enabled: bool,
@@ -120,11 +139,8 @@ pub fn whats_new(
         };
         let wir = s.spawn(|| wire::fetch_wire(cache_dir));
         let ver = s.spawn(|| {
-            // Resolve the tool refs for each requested pkg first (sequential, cheap).
-            let scope_tools: Vec<&ToolRef> = verdict_scope
-                .iter()
-                .filter_map(|pkg| installed.iter().find(|t| &t.pkg == pkg))
-                .collect();
+            // Resolve the tool refs for each requested (pkg, eco) first (sequential, cheap).
+            let scope_tools: Vec<&ToolRef> = resolve_scope(verdict_scope, installed);
             // Fetch release ages in parallel, bounded at 8 concurrent workers so a
             // user with dozens of outdated tools does not fire one thread per
             // package and thrash the shared HTTP connection pool / GitHub rate
@@ -220,6 +236,35 @@ mod tests {
         assert_eq!(t.pkg, "eslint");
         assert_eq!(t.eco, "npm");
         assert_eq!(t.installed.as_deref(), Some("9.0.0"));
+    }
+
+    #[test]
+    fn resolve_scope_is_eco_aware_not_pkg_only() {
+        // "prettier" installed on BOTH npm and brew. A scope asking for the
+        // brew row must resolve the brew tool, never the npm one -- a pkg-only
+        // match would hand the brew row npm's age verdict.
+        let installed = vec![
+            ToolRef {
+                pkg: "prettier".into(),
+                eco: "npm".into(),
+                installed: Some("2.0.0".into()),
+                latest: "3.0.0".into(),
+            },
+            ToolRef {
+                pkg: "prettier".into(),
+                eco: "brew".into(),
+                installed: Some("3.1.0".into()),
+                latest: "3.2.0".into(),
+            },
+        ];
+        let scope = vec![ScopeRef {
+            pkg: "prettier".into(),
+            eco: "brew".into(),
+        }];
+        let resolved = resolve_scope(&scope, &installed);
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].eco, "brew");
+        assert_eq!(resolved[0].latest, "3.2.0");
     }
 
     #[test]
