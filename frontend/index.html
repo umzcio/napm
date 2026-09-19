@@ -530,7 +530,7 @@
       // unrelated public package are indistinguishable from the versions alone.
       var ahead = st==="ahead";
       var aheadWhy = ahead ? "registry publishes "+t.latest+", which is below your "+t.installed+", so it is not shown as the latest; you may be on a prerelease, or this name may be shadowed by an unrelated public package" : "";
-      var noLatest = npx || manual || ahead;
+      var noLatest = npx || manual || ahead || !t.latest;
       var gTitle = manual?"unmanaged (no package manager owns this)" : ahead?("up to date: the registry lists nothing newer than your "+t.installed) : (st==="update"&&!npx) ? kind+" update"+(held?" - above your appetite":"") : "";
       var gTitleAttr = gTitle ? h` title="${gTitle}"` : '';
       var latTitleAttr = aheadWhy ? h` title="${aheadWhy}"` : '';
@@ -1009,7 +1009,7 @@
     openPopup([
       st==="update"&&!npx ? {label:"Update to "+t.latest, run:function(){ queueTransfer(t,t.latest,"update"); switchTab("transfers"); }}
         : !t.installed&&!npx ? {label:"Install", run:function(){ queueTransfer(t,t.latest,"install"); switchTab("transfers"); }}
-        : {label: npx?"npx tool (cached)":"Up to date", disabled:function(){return true;}},
+        : {label: npx?"npx tool (cached)":(st==="ahead"?"Up to date (registry lists nothing newer)":"Up to date"), disabled:function(){return true;}},
       {label: brew?"Roll back (brew: not supported)":prev?("Roll back to "+prev):"Roll back",
         disabled:function(){ return brew || !prev; },
         run:function(){ if(prev){ queueTransfer(t,prev,"rollback"); switchTab("transfers"); } }},

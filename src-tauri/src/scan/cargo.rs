@@ -322,16 +322,12 @@ fn first_array_string(rest: &str) -> Option<String> {
 }
 
 fn to_installed_tool(c: &CargoInstall, root: &Path) -> InstalledTool {
-    // Registry crates start with an empty `latest` sentinel, resolved by
-    // `enrich` against crates.io. git/path crates have no registry "latest":
-    // latest == installed makes `version::status_of` read "current" and the
-    // frontend show no Update action, which is the honest state for a source
-    // napm cannot compare against anything (mirrors npx's "freshness unknown"
-    // latest == installed pattern).
-    let latest = match c.source {
-        CrateSource::Registry => String::new(),
-        CrateSource::Git | CrateSource::Path | CrateSource::Other => c.version.clone(),
-    };
+    // Every source starts with an empty `latest`: it reads "current" via
+    // `version::status_of`'s empty-latest rule and renders as a dash in the
+    // frontend, which is the honest state for a source with nothing to
+    // compare against. Which rows get a crates.io lookup at all is decided
+    // by source in `resolve_latest`, not by this sentinel.
+    let latest = String::new();
     let bin_dir = root.join("bin");
     let bins: Vec<&str> = if c.bins.is_empty() {
         vec![c.name.as_str()]
@@ -382,18 +378,28 @@ fn all_bin_names(installs: &[CargoInstall]) -> Vec<String> {
         .collect()
 }
 
-/// Resolve "latest" for every registry-sourced row (empty `latest` sentinel)
-/// against crates.io, through the shared registry-document cache. Bounded at 8
-/// concurrent workers, mirroring `lib.rs::npx_latest`. A failed/unresolved
-/// lookup leaves `latest == installed`, matching the "never claim an update
-/// exists when unsure" rule everywhere else in napm.
-fn resolve_latest(rows: &mut [InstalledTool], cache_dir: &Path) {
-    let idxs: Vec<usize> = rows
-        .iter()
+/// Indices of rows eligible for a crates.io lookup: an empty `latest`
+/// sentinel AND a registry source. The source check is load-bearing: a
+/// git/path crate whose name also exists on crates.io must not be resolved,
+/// or it would show a false "update" for an unrelated registry package
+/// (name shadowing). Rows and installs are index-aligned by construction at
+/// the single call site.
+fn registry_row_indices(rows: &[InstalledTool], installs: &[CargoInstall]) -> Vec<usize> {
+    debug_assert_eq!(rows.len(), installs.len());
+    rows.iter()
         .enumerate()
-        .filter(|(_, r)| r.latest.is_empty())
+        .filter(|(i, r)| r.latest.is_empty() && installs[*i].source == CrateSource::Registry)
         .map(|(i, _)| i)
-        .collect();
+        .collect()
+}
+
+/// Resolve "latest" for every registry-sourced row against crates.io, through
+/// the shared registry-document cache. Bounded at 8 concurrent workers,
+/// mirroring `lib.rs::npx_latest`. A failed/unresolved lookup leaves `latest`
+/// empty, matching npm/brew/pip: `version::status_of` keeps the row "current"
+/// without printing a fabricated Latest.
+fn resolve_latest(rows: &mut [InstalledTool], installs: &[CargoInstall], cache_dir: &Path) {
+    let idxs = registry_row_indices(rows, installs);
     if idxs.is_empty() {
         return;
     }
@@ -426,8 +432,9 @@ fn resolve_latest(rows: &mut [InstalledTool], cache_dir: &Path) {
         }
     });
     for (j, latest) in results.into_iter().enumerate() {
-        let row = &mut rows[idxs[j]];
-        row.latest = latest.unwrap_or_else(|| row.installed.clone().unwrap_or_default());
+        if let Some(l) = latest {
+            rows[idxs[j]].latest = l;
+        }
     }
 }
 
@@ -495,7 +502,7 @@ pub fn scan_cargo_with_bins(cache_dir: &Path) -> (Vec<InstalledTool>, Vec<String
         .iter()
         .map(|c| to_installed_tool(c, &root))
         .collect();
-    resolve_latest(&mut rows, cache_dir);
+    resolve_latest(&mut rows, &installs, cache_dir);
     enrich_metadata(&mut rows, &root);
     (rows, bins)
 }
@@ -591,15 +598,35 @@ mod tests {
     }
 
     #[test]
-    fn to_installed_tool_git_and_path_rows_have_latest_equal_installed() {
+    fn to_installed_tool_git_and_path_rows_have_empty_latest() {
+        // git/path crates have no registry "latest" to compare against, so
+        // the field stays empty (renders as a dash, reads "current") rather
+        // than printing the crate's own version as though crates.io agreed.
         let installs = parse_crates2(fixture_crates2());
         let git = installs.iter().find(|c| c.name == "my-tool").unwrap();
         let row = to_installed_tool(git, Path::new("/Users/x/.cargo"));
-        assert_eq!(row.latest, row.installed.clone().unwrap());
+        assert_eq!(row.latest, "");
 
         let path = installs.iter().find(|c| c.name == "local-tool").unwrap();
         let row2 = to_installed_tool(path, Path::new("/Users/x/.cargo"));
-        assert_eq!(row2.latest, row2.installed.clone().unwrap());
+        assert_eq!(row2.latest, "");
+    }
+
+    #[test]
+    fn registry_row_indices_selects_only_registry_sources() {
+        // Fixture: ripgrep and cargo-edit are registry installs, my-tool is
+        // git, local-tool is path. Only the registry rows may be resolved
+        // against crates.io; a git/path crate whose name shadows a crates.io
+        // package must never get that package's version as its "latest".
+        let installs = parse_crates2(fixture_crates2());
+        let rows: Vec<InstalledTool> = installs
+            .iter()
+            .map(|c| to_installed_tool(c, Path::new("/Users/x/.cargo")))
+            .collect();
+        let idxs = registry_row_indices(&rows, &installs);
+        let mut selected: Vec<&str> = idxs.iter().map(|&i| rows[i].name.as_str()).collect();
+        selected.sort_unstable();
+        assert_eq!(selected, vec!["cargo-edit", "ripgrep"]);
     }
 
     #[test]
