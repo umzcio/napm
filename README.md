@@ -238,6 +238,7 @@ napm/
 │   │   ├── lib.rs              # Tauri commands (scan_installed, run_op, ...)
 │   │   ├── pathenv.rs          # login-shell PATH capture at startup
 │   │   ├── http.rs             # one shared keep-alive HTTP agent
+│   │   ├── importer.rs         # library import manifest (preview + sequential install)
 │   │   ├── store.rs            # JSON store: pins / history / settings
 │   │   ├── ops.rs              # streamed install / update / rollback
 │   │   ├── scan/               # one module per source (npm/brew/pip/npx/cargo/manual)

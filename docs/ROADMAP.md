@@ -27,7 +27,7 @@ function** (no decorative jokes).
   persists in localStorage.
 - **Branding.** npstr cat-box logo as app icon, titlebar, and splash. No
   decorative emoji. House-style README, MIT license, scrubbed git history (public
-  repo at github.com/umzcio, not yet pushed).
+  repo at github.com/umzcio).
 - **M3 - Transfers (real execution + history).** The Get / Update All / rollback
   buttons run real package commands. `run_op` streams live stdout/stderr into the
   active transfer row and reports the honest exit code, no fake progress bar.
@@ -350,9 +350,7 @@ committing to a scanner.
 
 ## Deferred on purpose
 
-- `hold` issue-velocity scoring (needs GitHub issue-rate data + judgment) - v1.5.
-- npx usage-frequency intelligence (rank by how often you npx a tool) - v1.5.
-- **npx latest-drift hint** (display-only): resolve the real npm latest for npx
-  rows and show a passive "last ran X, latest Y" hint with no Update action,
-  since the action is just re-running. Never a fake update path - v1.5.
+- npx usage-frequency intelligence - not observable: the npx cache records
+  that a spec ran at least once, not how often. Recency-of-last-run from cache
+  mtimes is the feasible weaker version. v1.5.
 - Cross-platform (macOS only for now).
