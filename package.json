@@ -7,6 +7,7 @@
   "repository": "github:umzcio/napm",
   "scripts": {
     "demo": "node reference/scanner.js --demo",
+    "check:csp": "node scripts/check-csp.js",
     "tauri": "tauri"
   },
   "devDependencies": {
