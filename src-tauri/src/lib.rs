@@ -29,8 +29,10 @@ fn scan_installed(app: tauri::AppHandle) -> Vec<InstalledTool> {
 }
 
 #[tauri::command(async)]
-fn set_pin(app: tauri::AppHandle, pkg: String, pinned: bool) {
-    open_store(&app).set_pin(&pkg, pinned);
+fn set_pin(app: tauri::AppHandle, pkg: String, pinned: bool) -> Result<(), String> {
+    open_store(&app)
+        .set_pin(&pkg, pinned)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command(async)]
@@ -122,8 +124,10 @@ fn get_settings(app: tauri::AppHandle) -> store::Settings {
 }
 
 #[tauri::command(async)]
-fn set_settings(app: tauri::AppHandle, settings: store::Settings) {
-    open_store(&app).set_settings(&settings);
+fn set_settings(app: tauri::AppHandle, settings: store::Settings) -> Result<(), String> {
+    open_store(&app)
+        .set_settings(&settings)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command(async)]
