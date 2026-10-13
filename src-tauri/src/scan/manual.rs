@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 /// The first version-like token in `s`: a run of digits and dots that contains
@@ -57,7 +57,7 @@ fn managed_roots() -> Vec<PathBuf> {
     ];
     // Resolved Homebrew prefix, if brew is installed (covers non-standard prefixes).
     if let Some(prefix) = super::brew::brew_prefix() {
-        roots.push(prefix.clone());
+        roots.push(prefix.to_path_buf());
     }
     // Home-relative toolchain / version-manager dirs and the npx cache.
     if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
@@ -72,7 +72,7 @@ fn managed_roots() -> Vec<PathBuf> {
     // <prefix>/lib/node_modules, which `npm root -g` reports. Without this, npm
     // and npx globals leak in as "manual" wherever the prefix is not a brew root.
     if let Some(root) = super::npm::npm_root() {
-        roots.push(root.clone());
+        roots.push(root.to_path_buf());
     }
     // Resolved cargo install root's bin/ dir (plan 024 decision 1): not
     // hardcoded to ~/.cargo like the toolchain entry above, so a custom
@@ -260,9 +260,8 @@ pub fn scan_manual(
 ) -> Vec<InstalledTool> {
     let home = std::env::var_os("HOME").map(PathBuf::from);
     let roots = managed_roots();
-    let path = match std::env::var_os("PATH") {
-        Some(p) => p,
-        None => return Vec::new(),
+    let Some(path) = std::env::var_os("PATH") else {
+        return Vec::new();
     };
 
     // Phase 1: walk $PATH and collect candidates. Filesystem-only: nothing is
@@ -270,23 +269,20 @@ pub fn scan_manual(
     let mut seen: BTreeSet<PathBuf> = BTreeSet::new();
     let mut candidates: Vec<Candidate> = Vec::new();
     for dir in std::env::split_paths(&path) {
-        let entries = match std::fs::read_dir(&dir) {
-            Ok(e) => e,
-            Err(_) => continue,
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
         };
         for entry in entries.flatten() {
             let candidate = entry.path();
             // Must be executable (regular file or symlink to one).
-            let meta = match std::fs::metadata(&candidate) {
-                Ok(m) => m,
-                Err(_) => continue, // broken symlink, etc.
+            let Ok(meta) = std::fs::metadata(&candidate) else {
+                continue; // broken symlink, etc.
             };
             if !meta.is_file() || meta.permissions().mode() & 0o111 == 0 {
                 continue;
             }
-            let real = match std::fs::canonicalize(&candidate) {
-                Ok(r) => r,
-                Err(_) => continue,
+            let Ok(real) = std::fs::canonicalize(&candidate) else {
+                continue;
             };
             let basename = match candidate.file_name().and_then(|n| n.to_str()) {
                 Some(n) => n.to_string(),
@@ -348,11 +344,11 @@ pub fn scan_manual(
                         let v = probe_version(&candidates_ref[idx].real);
                         local.push((idx, v));
                     }
-                    results_ref.lock().unwrap().extend(local);
+                    crate::lock(results_ref).extend(local);
                 });
             }
         });
-        for (idx, version) in results.into_inner().unwrap() {
+        for (idx, version) in results.into_inner().unwrap_or_else(PoisonError::into_inner) {
             let c = &candidates[idx];
             cache.entries.insert(
                 c.real.to_string_lossy().into_owned(),

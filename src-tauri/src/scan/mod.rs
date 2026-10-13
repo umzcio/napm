@@ -63,8 +63,7 @@ pub(crate) fn path_mtime(path: &std::path::Path) -> i64 {
         .and_then(|m| m.modified())
         .ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_secs() as i64)
 }
 
 /// Aggregate across all sources, marking rows whose pkg is in `pins`.

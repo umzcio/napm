@@ -54,9 +54,8 @@ pub fn parse_pypi_time(json: &str, version: &str) -> Option<i64> {
 /// (recommendation, age_label) from a publish time and "now". Settled (>= 7 days)
 /// is "safe"; fresher is "new". A None publish time is "unknown".
 pub fn age_verdict(published: Option<i64>, now: i64) -> (String, String) {
-    let p = match published {
-        Some(p) => p,
-        None => return ("unknown".into(), "".into()),
+    let Some(p) = published else {
+        return ("unknown".into(), String::new());
     };
     let days = ((now - p).max(0)) / 86400;
     let label = if days < 1 {
@@ -177,9 +176,8 @@ pub fn parse_github_releases(json: &str, version: &str) -> Vec<String> {
         Ok(v) => v,
         Err(_) => return Vec::new(),
     };
-    let arr = match v.as_array() {
-        Some(a) => a,
-        None => return Vec::new(),
+    let Some(arr) = v.as_array() else {
+        return Vec::new();
     };
     let want = version.trim_start_matches('v');
     let body = arr.iter().find_map(|rel| {
@@ -190,9 +188,8 @@ pub fn parse_github_releases(json: &str, version: &str) -> Vec<String> {
             None
         }
     });
-    let body = match body {
-        Some(b) => b,
-        None => return Vec::new(),
+    let Some(body) = body else {
+        return Vec::new();
     };
     body.lines()
         .map(|l| l.trim().trim_start_matches(['#', '-', '*', ' ']).trim())
@@ -391,10 +388,7 @@ pub fn changelog(eco: &str, pkg: &str, version: &str, cache_dir: &Path) -> Vec<S
         safe_eco, safe_pkg, safe_ver
     ));
 
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+    let now = crate::unix_now();
 
     // Return the cached result on a hit. Legacy Vec<String> files (written
     // before the timestamped format) fail to parse as ChangelogCache and are
@@ -430,9 +424,10 @@ pub fn changelog(eco: &str, pkg: &str, version: &str, cache_dir: &Path) -> Vec<S
         _ => None,
     };
 
-    // fetch_result: Ok(vec) means the HTTP call succeeded (notes may be empty);
-    // Err(()) means the HTTP call itself failed (network / non-2xx).
-    let fetch_result: Result<Vec<String>, ()> = (|| {
+    // fetch_result: Some(vec) means the HTTP call succeeded (notes may be
+    // empty); None means there was no repo to ask or the HTTP call itself
+    // failed (network / non-2xx).
+    let fetch_result: Option<Vec<String>> = (|| {
         let (owner, repo) = github_repo_from_url(repo_url.as_deref()?)?;
         // Belt-and-braces: see the analogous encode in velocity_verdict's count closure.
         let releases_url = format!(
@@ -441,23 +436,20 @@ pub fn changelog(eco: &str, pkg: &str, version: &str, cache_dir: &Path) -> Vec<S
             crate::http::encode(&repo)
         );
         let mut headers: Vec<(&str, &str)> = vec![("Accept", "application/vnd.github+json")];
-        // Read the token at call time; store it in a local binding so the reference lives long enough.
-        let token_str: String;
+        // Read the token at call time. Declared outside the `if` so the header
+        // value outlives the borrow pushed into `headers`.
         let token_header: String;
         if let Some(token) = super::github_token(cache_dir) {
-            token_str = token;
-            token_header = format!("Bearer {}", token_str);
+            token_header = format!("Bearer {token}");
             headers.push(("Authorization", &token_header));
         }
-        // Propagate HTTP errors as None so the outer closure returns None -> Err(()).
+        // Propagate HTTP errors as None.
         let body = crate::http::get_with_headers(&releases_url, &headers).ok()?;
         Some(parse_github_releases(&body, version))
-    })()
-    .map(Ok)
-    .unwrap_or(Err(()));
+    })();
 
     match fetch_result {
-        Ok(result) => {
+        Some(result) => {
             // Successful HTTP response: cache even when no matching release
             // notes were found (a legitimate empty result), to avoid hammering
             // the API. Empty results carry a 1h TTL via changelog_cache_hit.
@@ -469,7 +461,7 @@ pub fn changelog(eco: &str, pkg: &str, version: &str, cache_dir: &Path) -> Vec<S
             }
             result
         }
-        Err(()) => {
+        None => {
             // HTTP call failed (network error, rate-limit, etc.): do NOT cache so
             // the next run retries.
             Vec::new()

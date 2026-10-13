@@ -44,39 +44,34 @@ pub fn dedup_npx(rows: Vec<InstalledTool>) -> Vec<InstalledTool> {
 /// cached package. `latest` equals `installed` (freshness is unknown for npx
 /// until the registry layer). Returns empty if the cache does not exist.
 pub fn scan_npx() -> Vec<InstalledTool> {
-    let home = match std::env::var_os("HOME") {
-        Some(h) => h,
-        None => return Vec::new(),
+    let Some(home) = std::env::var_os("HOME") else {
+        return Vec::new();
     };
     let root = std::path::Path::new(&home).join(".npm").join("_npx");
-    let entries = match fs::read_dir(&root) {
-        Ok(e) => e,
-        Err(_) => return Vec::new(),
+    let Ok(entries) = fs::read_dir(&root) else {
+        return Vec::new();
     };
 
     let mut rows: Vec<InstalledTool> = Vec::new();
     for entry in entries.flatten() {
         let dir = entry.path();
-        let shim = match fs::read_to_string(dir.join("package.json")) {
-            Ok(s) => s,
-            Err(_) => continue,
+        let Ok(shim) = fs::read_to_string(dir.join("package.json")) else {
+            continue;
         };
         let shim: Value = match serde_json::from_str(&shim) {
             Ok(v) => v,
             Err(_) => continue,
         };
-        let specs = match shim
+        let Some(specs) = shim
             .get("_npx")
             .and_then(|n| n.get("packages"))
             .and_then(|p| p.as_array())
-        {
-            Some(s) => s,
-            None => continue,
+        else {
+            continue;
         };
         for spec in specs {
-            let spec = match spec.as_str() {
-                Some(s) => s,
-                None => continue,
+            let Some(spec) = spec.as_str() else {
+                continue;
             };
             let name = npx_pkg_name(spec);
             let pkg_dir = dir.join("node_modules").join(name);

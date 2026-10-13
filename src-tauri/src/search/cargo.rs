@@ -44,9 +44,8 @@ pub fn parse_cargo_weekly_downloads(json: &str) -> u64 {
         Ok(v) => v,
         Err(_) => return 0,
     };
-    let entries = match v.get("version_downloads").and_then(|a| a.as_array()) {
-        Some(a) => a,
-        None => return 0,
+    let Some(entries) = v.get("version_downloads").and_then(|a| a.as_array()) else {
+        return 0;
     };
     let mut dates: Vec<&str> = entries
         .iter()
@@ -60,10 +59,9 @@ pub fn parse_cargo_weekly_downloads(json: &str) -> u64 {
         .filter(|e| {
             e.get("date")
                 .and_then(|d| d.as_str())
-                .map(|d| recent.contains(d))
-                .unwrap_or(false)
+                .is_some_and(|d| recent.contains(d))
         })
-        .filter_map(|e| e.get("downloads").and_then(|d| d.as_u64()))
+        .filter_map(|e| e.get("downloads").and_then(serde_json::Value::as_u64))
         .sum()
 }
 
@@ -71,16 +69,14 @@ pub fn parse_cargo_weekly_downloads(json: &str) -> u64 {
 /// endpoint this app integrates (npm's is federated instead); the cargo
 /// source label in the UI explains the exact-match limitation, mirroring pip.
 pub fn search_cargo(query: &str) -> Vec<SearchResult> {
-    let body = match crate::http::get(&format!(
+    let Ok(body) = crate::http::get(&format!(
         "https://crates.io/api/v1/crates/{}",
         crate::http::encode(query)
-    )) {
-        Ok(b) => b,
-        Err(_) => return Vec::new(),
+    )) else {
+        return Vec::new();
     };
-    let mut r = match parse_crate(&body) {
-        Some(r) => r,
-        None => return Vec::new(),
+    let Some(mut r) = parse_crate(&body) else {
+        return Vec::new();
     };
     let dl_url = format!(
         "https://crates.io/api/v1/crates/{}/downloads",

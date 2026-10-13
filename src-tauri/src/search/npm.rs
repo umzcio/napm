@@ -9,15 +9,13 @@ pub fn parse_npm_search(json: &str) -> Vec<SearchResult> {
         Ok(v) => v,
         Err(_) => return Vec::new(),
     };
-    let objects = match v.get("objects").and_then(|o| o.as_array()) {
-        Some(a) => a,
-        None => return Vec::new(),
+    let Some(objects) = v.get("objects").and_then(|o| o.as_array()) else {
+        return Vec::new();
     };
     let mut out = Vec::new();
     for o in objects {
-        let p = match o.get("package") {
-            Some(p) => p,
-            None => continue,
+        let Some(p) = o.get("package") else {
+            continue;
         };
         let name = p.get("name").and_then(|x| x.as_str()).unwrap_or("");
         if name.is_empty() {
@@ -59,7 +57,7 @@ pub fn parse_downloads(json: &str) -> BTreeMap<String, u64> {
     // Single shape: has a top-level "package" string + "downloads" number.
     if let (Some(pkg), Some(dl)) = (
         v.get("package").and_then(|x| x.as_str()),
-        v.get("downloads").and_then(|x| x.as_u64()),
+        v.get("downloads").and_then(serde_json::Value::as_u64),
     ) {
         map.insert(pkg.to_string(), dl);
         return map;
@@ -67,7 +65,7 @@ pub fn parse_downloads(json: &str) -> BTreeMap<String, u64> {
     // Bulk shape: object of pkg -> {downloads, package}. Null entries = unknown pkg.
     if let Some(obj) = v.as_object() {
         for (k, val) in obj {
-            if let Some(dl) = val.get("downloads").and_then(|x| x.as_u64()) {
+            if let Some(dl) = val.get("downloads").and_then(serde_json::Value::as_u64) {
                 map.insert(k.clone(), dl);
             }
         }
@@ -83,9 +81,8 @@ pub fn search_npm(query: &str) -> Vec<SearchResult> {
         "https://registry.npmjs.org/-/v1/search?text={}&size=25",
         crate::http::encode(query)
     );
-    let body = match crate::http::get(&url) {
-        Ok(b) => b,
-        Err(_) => return Vec::new(),
+    let Ok(body) = crate::http::get(&url) else {
+        return Vec::new();
     };
     let mut rows = parse_npm_search(&body);
     if rows.is_empty() {

@@ -54,7 +54,7 @@ pub fn parse_pip(list_json: &str, outdated_json: &str) -> Vec<InstalledTool> {
                         if !latest.is_empty() {
                             v.insert((
                                 name.to_string(),
-                                cur.map(|s| s.to_string()),
+                                cur.map(std::string::ToString::to_string),
                                 latest.to_string(),
                             ));
                         }
@@ -95,8 +95,7 @@ pub(crate) fn pip_bin() -> Option<&'static str> {
             let ok = Command::new(c)
                 .arg("--version")
                 .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false);
+                .is_ok_and(|o| o.status.success());
             if ok {
                 return Some(c);
             }
@@ -148,22 +147,19 @@ fn pip_metadata() -> BTreeMap<String, PipMeta> {
     let mut map = BTreeMap::new();
     let (dirs, _) = python_site();
     for dir in dirs {
-        let entries = match std::fs::read_dir(dir) {
-            Ok(e) => e,
-            Err(_) => continue,
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
         };
         for entry in entries.flatten() {
             if !entry.file_name().to_string_lossy().ends_with(".dist-info") {
                 continue;
             }
             let info_dir = entry.path();
-            let metadata = match std::fs::read_to_string(info_dir.join("METADATA")) {
-                Ok(s) => s,
-                Err(_) => continue,
+            let Ok(metadata) = std::fs::read_to_string(info_dir.join("METADATA")) else {
+                continue;
             };
-            let name = match super::publisher::metadata_field(&metadata, "Name") {
-                Some(n) => n,
-                None => continue,
+            let Some(name) = super::publisher::metadata_field(&metadata, "Name") else {
+                continue;
             };
             let publisher = super::publisher::pip_author(&metadata)
                 .and_then(|a| super::publisher::to_handle(&a))
@@ -191,9 +187,8 @@ fn pip_metadata() -> BTreeMap<String, PipMeta> {
 /// Run the real pip commands and merge, then enrich publisher, description,
 /// size, and updated time from the installed dist-info. Empty if no pip.
 pub fn scan_pip() -> Vec<InstalledTool> {
-    let bin = match pip_bin() {
-        Some(b) => b,
-        None => return Vec::new(),
+    let Some(bin) = pip_bin() else {
+        return Vec::new();
     };
     let list = super::run(bin, &["list", "--format=json"]);
     let outdated = super::run(bin, &["list", "--outdated", "--format=json"]);
@@ -201,9 +196,9 @@ pub fn scan_pip() -> Vec<InstalledTool> {
     let meta = pip_metadata();
     for row in rows.iter_mut() {
         if let Some(m) = meta.get(&row.pkg.to_lowercase()) {
-            row.publisher = m.publisher.clone();
-            row.description = m.description.clone();
-            row.size = m.size.clone();
+            row.publisher.clone_from(&m.publisher);
+            row.description.clone_from(&m.description);
+            row.size.clone_from(&m.size);
             row.updated = m.updated;
         }
     }

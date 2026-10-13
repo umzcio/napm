@@ -9,9 +9,8 @@ pub fn parse_advisories(json: &str, eco: &str) -> Vec<WireItem> {
         Ok(v) => v,
         Err(_) => return Vec::new(),
     };
-    let arr = match v.as_array() {
-        Some(a) => a,
-        None => return Vec::new(),
+    let Some(arr) = v.as_array() else {
+        return Vec::new();
     };
     arr.iter()
         .filter_map(|a| {
@@ -103,13 +102,12 @@ pub fn fetch_wire(cache_dir: &Path) -> Option<(Vec<WireItem>, bool)> {
     let fresh = std::fs::metadata(&cache_path)
         .and_then(|m| m.modified())
         .ok()
-        .map(|mtime| {
+        .is_some_and(|mtime| {
             SystemTime::now()
                 .duration_since(mtime)
                 .unwrap_or(Duration::MAX)
                 < Duration::from_secs(60 * 60)
-        })
-        .unwrap_or(false);
+        });
 
     if fresh {
         if let Ok(text) = std::fs::read_to_string(&cache_path) {
@@ -131,13 +129,12 @@ pub fn fetch_wire(cache_dir: &Path) -> Option<(Vec<WireItem>, bool)> {
     let pip_url =
         "https://api.github.com/advisories?type=malware&ecosystem=pip&sort=published&per_page=15";
 
-    // Build auth header string bindings so references live long enough.
-    let token_str: String;
+    // Declared outside the `if` so the header value outlives the borrow
+    // pushed into `base_headers`.
     let token_header: String;
     let mut base_headers: Vec<(&str, &str)> = vec![("Accept", "application/vnd.github+json")];
     if let Some(token) = super::github_token(cache_dir) {
-        token_str = token;
-        token_header = format!("Bearer {}", token_str);
+        token_header = format!("Bearer {token}");
         base_headers.push(("Authorization", &token_header));
     }
 
