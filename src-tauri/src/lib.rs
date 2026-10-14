@@ -187,11 +187,9 @@ fn export_library(
     let safe = cache::sanitize_key(&filename);
     let path = dir.join(safe);
     std::fs::write(&path, content).map_err(|e| e.to_string())?;
-    // -R reveals and selects the new file in Finder.
-    let _ = std::process::Command::new("open")
-        .arg("-R")
-        .arg(&path)
-        .spawn();
+    // -R reveals and selects the new file in Finder. Best-effort: the export
+    // itself already succeeded, and the status line reports its path.
+    let _ = macos_open([std::ffi::OsStr::new("-R"), path.as_os_str()]);
     Ok(path.to_string_lossy().to_string())
 }
 
@@ -220,19 +218,40 @@ async fn import_preview(
     .await?
 }
 
-#[tauri::command(async)]
-fn open_data_dir(app: tauri::AppHandle) {
-    let dir = app_data_dir(&app);
-    let _ = std::fs::create_dir_all(&dir);
-    let _ = std::process::Command::new("open").arg(&dir).spawn();
+/// Run macOS `open` with `args` and wait for it. `open` hands the request to
+/// Launch Services and exits at once, so waiting is cheap; it also reaps the
+/// child (a bare `spawn()` left a zombie process per call) and turns a failure
+/// into an error the frontend's status line shows, instead of a silent no-op.
+fn macos_open<I, S>(args: I) -> Result<(), String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
+    let out = std::process::Command::new("open")
+        .args(args)
+        .output()
+        .map_err(|e| format!("could not run open: {e}"))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
 }
 
 #[tauri::command(async)]
-fn open_external(url: String) {
+fn open_data_dir(app: tauri::AppHandle) -> Result<(), String> {
+    let dir = app_data_dir(&app);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    macos_open([&dir])
+}
+
+#[tauri::command(async)]
+fn open_external(url: String) -> Result<(), String> {
     // Only open secure web URLs, never arbitrary local paths or args.
-    if url.starts_with("https://") {
-        let _ = std::process::Command::new("open").arg(&url).spawn();
+    if !url.starts_with("https://") {
+        return Err("only https:// links can be opened".to_string());
     }
+    macos_open([&url])
 }
 
 #[derive(serde::Serialize)]
@@ -285,16 +304,14 @@ async fn npx_latest(app: tauri::AppHandle, pkgs: Vec<String>) -> Result<Vec<NpxL
 }
 
 /// Reveal and select a path in Finder (`open -R`). Validates the path exists so
-/// a stale entry never shells an arbitrary string. No-op on a missing path.
+/// a stale entry never shells an arbitrary string; a missing path is an error
+/// the status line shows rather than a click that silently does nothing.
 #[tauri::command(async)]
-fn reveal_in_finder(path: String) {
-    let p = std::path::Path::new(&path);
-    if p.exists() {
-        let _ = std::process::Command::new("open")
-            .arg("-R")
-            .arg(&path)
-            .spawn();
+fn reveal_in_finder(path: String) -> Result<(), String> {
+    if !std::path::Path::new(&path).exists() {
+        return Err(format!("{path} no longer exists"));
     }
+    macos_open(["-R", path.as_str()])
 }
 
 #[tauri::command(async)]
@@ -453,5 +470,17 @@ mod tests {
         assert!(m.is_poisoned());
         lock(&m).push(2);
         assert_eq!(*lock(&m), vec![1, 2]);
+    }
+
+    #[test]
+    fn open_external_should_reject_non_https_urls_without_running_open() {
+        let err = open_external("file:///etc/passwd".to_string()).unwrap_err();
+        assert_eq!(err, "only https:// links can be opened");
+    }
+
+    #[test]
+    fn reveal_in_finder_should_report_a_missing_path_instead_of_doing_nothing() {
+        let err = reveal_in_finder("/nonexistent/napm-test-path".to_string()).unwrap_err();
+        assert_eq!(err, "/nonexistent/napm-test-path no longer exists");
     }
 }

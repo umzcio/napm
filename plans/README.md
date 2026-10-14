@@ -262,6 +262,20 @@ hardening PR or promote individually.
   trait would only add indirection); typed `Eco`/`Action` enums at the IPC
   boundary (worth doing, but it touches the serialized data model and the
   frontend, so it needs its own plan).
+- **tauri-v2 round (2026-10-13), not adopted**: streaming `run_op` output
+  over an `ipc::Channel` instead of global `transfer-line`/`transfer-done`
+  events (the v2-recommended pattern, but the frontend's transfer queue and
+  Update All are built on the permanent op_id-keyed listeners, so it needs its
+  own plan); a managed `State<Store>` (config windows are created BEFORE the
+  `setup` closure runs, so state managed there can be missing on the first
+  invoke, while the per-call `open_store` cannot race); an app-command ACL
+  via `tauri_build::AppManifest` (one local window under a strict CSP, and
+  every new command would need a build.rs plus capability entry);
+  `tauri-plugin-opener` over `open` and a desktop-wide target gate for
+  `tauri-plugin-updater` (both only matter once cross-platform is back on the
+  roadmap). The same window-before-setup order means `migrate_legacy` can run
+  after the first frontend read, but it only ever applied to pre-v0.1.0 dev
+  builds.
 
 ## Audit coverage note
 
