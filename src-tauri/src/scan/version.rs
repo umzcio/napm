@@ -346,4 +346,53 @@ mod tests {
             }
         }
     }
+
+    mod props {
+        use super::super::*;
+        use proptest::prelude::*;
+
+        /// Version-shaped strings over a deliberately tiny alphabet, so random
+        /// triples often share prefixes and hit the suffix and padding rules.
+        fn version() -> impl Strategy<Value = String> {
+            "[0-2a_-]{0,2}(\\.[0-2a_-]{0,2}){0,3}"
+        }
+
+        proptest! {
+            #[test]
+            fn cmp_is_reflexive(a in version()) {
+                prop_assert_eq!(cmp(&a, &a), Ordering::Equal);
+            }
+
+            #[test]
+            fn cmp_is_antisymmetric(a in version(), b in version()) {
+                prop_assert_eq!(cmp(&a, &b), cmp(&b, &a).reverse());
+            }
+
+            #[test]
+            fn cmp_is_transitive(a in version(), b in version(), c in version()) {
+                if cmp(&a, &b) != Ordering::Greater && cmp(&b, &c) != Ordering::Greater {
+                    prop_assert_ne!(cmp(&a, &c), Ordering::Greater);
+                }
+            }
+
+            #[test]
+            fn status_offers_update_only_for_a_strictly_newer_latest(
+                installed in version(),
+                latest in version(),
+            ) {
+                let status = status_of("npm", Some(&installed), &latest);
+                if status == "update" {
+                    prop_assert_eq!(cmp(&latest, &installed), Ordering::Greater);
+                    prop_assert_ne!(status_of("npm", Some(&latest), &installed), "update");
+                }
+            }
+
+            #[test]
+            fn bump_kind_is_none_for_versions_cmp_calls_equal(a in version(), b in version()) {
+                if cmp(&a, &b) == Ordering::Equal {
+                    prop_assert_eq!(bump_kind(&a, &b), "none");
+                }
+            }
+        }
+    }
 }

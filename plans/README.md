@@ -255,6 +255,13 @@ hardening PR or promote individually.
   `#[allow]` (needs Rust 1.81, MSRV is 1.77.2); enabling clippy `pedantic` or
   `nursery` wholesale (about 250 hits, mostly doc backticks, format-arg
   inlining, and `u64`/`i64` casts on Unix seconds).
+- **rust-engineer round (2026-10-13), not adopted**: `thiserror` error enums
+  (same reasoning as above); doctests on internal APIs (every module is
+  private to a cdylib, so rustdoc never runs them); trait hierarchies over the
+  per-ecosystem scanners (six fixed ecosystems with distinct data shapes, so a
+  trait would only add indirection); typed `Eco`/`Action` enums at the IPC
+  boundary (worth doing, but it touches the serialized data model and the
+  frontend, so it needs its own plan).
 
 ## Audit coverage note
 
