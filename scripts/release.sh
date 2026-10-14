@@ -11,6 +11,7 @@ source "$CONFIG"
 # records the version twice, so both fields are checked. Run
 # scripts/bump-version.sh to bring them back into sync.
 command -v jq >/dev/null || { echo "jq is required (brew install jq)"; exit 1; }
+command -v create-dmg >/dev/null || { echo "create-dmg is required (brew install create-dmg)"; exit 1; }
 PKG_VER="$(jq -r .version "$ROOT/package.json")"
 CARGO_VER="$(awk '/^version = "/ { gsub(/(version = "|")/, ""); print; exit }' "$ROOT/src-tauri/Cargo.toml")"
 TAURI_VER="$(jq -r .version "$ROOT/src-tauri/tauri.conf.json")"
@@ -35,7 +36,14 @@ echo "==> Building, signing, notarizing, stapling (this takes a few minutes)"
 cd "$ROOT"
 npm run tauri build
 
-DMG="$(ls -t src-tauri/target/release/bundle/dmg/*.dmg | head -1)"
+# Tauri builds only the .app (bundle.targets); the installer .dmg is styled and
+# signed by create-dmg. Same file name Tauri's dmg target used to emit.
+APP="src-tauri/target/release/bundle/macos/napm.app"
+DMG_DIR="src-tauri/target/release/bundle/dmg"
+mkdir -p "$DMG_DIR"
+DMG="$DMG_DIR/napm_${TAURI_VER}_aarch64.dmg"
+echo "==> Building the installer .dmg with create-dmg"
+scripts/make-dmg.sh "$APP" "$DMG"
 TARBALL="$(ls -t src-tauri/target/release/bundle/macos/*.app.tar.gz 2>/dev/null | head -1 || true)"
 
 # Tauri notarizes and staples the .app, but not the .dmg container. Notarize and
