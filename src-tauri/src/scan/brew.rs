@@ -2,7 +2,7 @@ use super::InstalledTool;
 use serde_json::Value;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 /// The resolved Homebrew prefix (e.g. `/opt/homebrew`), from `brew --prefix`.
@@ -11,7 +11,7 @@ use std::sync::OnceLock;
 /// user who installs or moves Homebrew while napm is running only sees the
 /// new prefix after an app restart (PATH is already captured once at startup
 /// for the same reason).
-pub(crate) fn brew_prefix() -> &'static Option<PathBuf> {
+pub(crate) fn brew_prefix() -> Option<&'static Path> {
     static P: OnceLock<Option<PathBuf>> = OnceLock::new();
     P.get_or_init(|| {
         let out = super::run("brew", &["--prefix"]);
@@ -22,6 +22,7 @@ pub(crate) fn brew_prefix() -> &'static Option<PathBuf> {
             Some(PathBuf::from(p))
         }
     })
+    .as_deref()
 }
 
 /// Merge `brew list --versions` (installed) with `brew outdated --json=v2`
@@ -67,7 +68,10 @@ pub fn parse_brew(list_versions: &str, outdated_json: &str) -> Vec<InstalledTool
                     }
                     Entry::Vacant(v) => {
                         if !latest.is_empty() {
-                            v.insert((installed.map(|s| s.to_string()), latest.to_string()));
+                            v.insert((
+                                installed.map(std::string::ToString::to_string),
+                                latest.to_string(),
+                            ));
                         }
                     }
                 }
@@ -157,8 +161,10 @@ pub fn parse_install_receipt(json: &str) -> (Option<i64>, Option<bool>) {
         Ok(v) => v,
         Err(_) => return (None, None),
     };
-    let time = v.get("time").and_then(|x| x.as_i64());
-    let on_request = v.get("installed_on_request").and_then(|x| x.as_bool());
+    let time = v.get("time").and_then(serde_json::Value::as_i64);
+    let on_request = v
+        .get("installed_on_request")
+        .and_then(serde_json::Value::as_bool);
     (time, on_request)
 }
 
@@ -166,8 +172,7 @@ pub fn parse_install_receipt(json: &str) -> (Option<i64>, Option<bool>) {
 /// time falls back to the keg mtime; on_request defaults to true when unknown.
 fn brew_receipt(keg: &std::path::Path) -> (i64, bool) {
     let (time, on_request) = std::fs::read_to_string(keg.join("INSTALL_RECEIPT.json"))
-        .map(|s| parse_install_receipt(&s))
-        .unwrap_or((None, None));
+        .map_or((None, None), |s| parse_install_receipt(&s));
     (
         time.unwrap_or_else(|| super::path_mtime(keg)),
         on_request.unwrap_or(true),

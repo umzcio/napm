@@ -202,7 +202,7 @@ mod tests {
             name: pkg.to_string(),
             eco: eco.to_string(),
             pkg: pkg.to_string(),
-            installed: installed.map(|s| s.to_string()),
+            installed: installed.map(std::string::ToString::to_string),
             latest: installed.unwrap_or("").to_string(),
             size: String::new(),
             pinned: false,

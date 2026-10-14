@@ -34,14 +34,12 @@ pub fn dir_size(path: &Path) -> u64 {
         }
     }
     let mut total = 0;
-    let entries = match std::fs::read_dir(path) {
-        Ok(e) => e,
-        Err(_) => return 0,
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return 0;
     };
     for entry in entries.flatten() {
-        let ft = match entry.file_type() {
-            Ok(f) => f,
-            Err(_) => continue,
+        let Ok(ft) = entry.file_type() else {
+            continue;
         };
         if ft.is_symlink() {
             continue;

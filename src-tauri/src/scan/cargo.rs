@@ -84,15 +84,13 @@ fn parse_crates2(json: &str) -> Vec<CargoInstall> {
         Ok(v) => v,
         Err(_) => return Vec::new(),
     };
-    let installs = match v.get("installs").and_then(|i| i.as_object()) {
-        Some(o) => o,
-        None => return Vec::new(),
+    let Some(installs) = v.get("installs").and_then(|i| i.as_object()) else {
+        return Vec::new();
     };
     let mut out = Vec::new();
     for (key, info) in installs {
-        let (name, version, source) = match parse_package_id(key) {
-            Some(t) => t,
-            None => continue,
+        let Some((name, version, source)) = parse_package_id(key) else {
+            continue;
         };
         let bins: Vec<String> = info
             .get("bins")
@@ -241,9 +239,9 @@ fn resolve_cargo_root() -> Option<PathBuf> {
 /// Memoized cargo install root (mirrors `npm::npm_root`/`pip::pip_bin`). A
 /// change to `CARGO_INSTALL_ROOT`/the cargo config while napm is running is
 /// only picked up after an app restart.
-pub(crate) fn cargo_root() -> &'static Option<PathBuf> {
+pub(crate) fn cargo_root() -> Option<&'static Path> {
     static P: OnceLock<Option<PathBuf>> = OnceLock::new();
-    P.get_or_init(resolve_cargo_root)
+    P.get_or_init(resolve_cargo_root).as_deref()
 }
 
 /// crates.io crate JSON (`GET /api/v1/crates/<name>`) -> the latest version.
@@ -332,7 +330,7 @@ fn to_installed_tool(c: &CargoInstall, root: &Path) -> InstalledTool {
     let bins: Vec<&str> = if c.bins.is_empty() {
         vec![c.name.as_str()]
     } else {
-        c.bins.iter().map(|s| s.as_str()).collect()
+        c.bins.iter().map(std::string::String::as_str).collect()
     };
     let size: u64 = bins
         .iter()
@@ -486,9 +484,8 @@ fn enrich_metadata(rows: &mut [InstalledTool], cargo_home: &Path) {
 /// binaries (e.g. `cargo-edit`'s `cargo-add`/`cargo-rm`/...) are excluded too,
 /// not just the crate's own row name.
 pub fn scan_cargo_with_bins(cache_dir: &Path) -> (Vec<InstalledTool>, Vec<String>) {
-    let root = match cargo_root() {
-        Some(p) => p.clone(),
-        None => return (Vec::new(), Vec::new()),
+    let Some(root) = cargo_root() else {
+        return (Vec::new(), Vec::new());
     };
     let text = std::fs::read_to_string(root.join(".crates2.json")).unwrap_or_default();
     let installs = if serde_json::from_str::<Value>(&text).is_ok() {
@@ -500,10 +497,10 @@ pub fn scan_cargo_with_bins(cache_dir: &Path) -> (Vec<InstalledTool>, Vec<String
     let bins = all_bin_names(&installs);
     let mut rows: Vec<InstalledTool> = installs
         .iter()
-        .map(|c| to_installed_tool(c, &root))
+        .map(|c| to_installed_tool(c, root))
         .collect();
     resolve_latest(&mut rows, &installs, cache_dir);
-    enrich_metadata(&mut rows, &root);
+    enrich_metadata(&mut rows, root);
     (rows, bins)
 }
 

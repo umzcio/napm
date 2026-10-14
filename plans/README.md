@@ -246,6 +246,15 @@ hardening PR or promote individually.
   `GITHUB_HEAD_REF` is set (which GitHub sets for `pull_request` but not for
   `push`). Fixed with a `checks: write` grant. Do not re-audit as an advisory
   problem.
+- **Rust best-practices round (2026-10-12), not adopted**:
+  `needless_pass_by_value` on the Tauri commands (owned args are how commands
+  deserialize); `needless_collect` on the npm downloads fan-out (collecting the
+  `JoinHandle`s is what makes the spawns concurrent); `thiserror` for the
+  `Result<_, String>` paths (every such error is either dropped so a source
+  degrades to no rows, or shown verbatim in the UI); `#[expect]` over
+  `#[allow]` (needs Rust 1.81, MSRV is 1.77.2); enabling clippy `pedantic` or
+  `nursery` wholesale (about 250 hits, mostly doc backticks, format-arg
+  inlining, and `u64`/`i64` casts on Unix seconds).
 
 ## Audit coverage note
 

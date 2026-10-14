@@ -23,9 +23,8 @@ pub fn parse_catalog(json: &str) -> Vec<Formula> {
         Ok(v) => v,
         Err(_) => return Vec::new(),
     };
-    let arr = match v.as_array() {
-        Some(a) => a,
-        None => return Vec::new(),
+    let Some(arr) = v.as_array() else {
+        return Vec::new();
     };
     let mut out = Vec::with_capacity(arr.len());
     for f in arr {
@@ -59,9 +58,8 @@ pub fn parse_analytics(json: &str) -> BTreeMap<String, u64> {
         Ok(v) => v,
         Err(_) => return map,
     };
-    let formulae = match v.get("formulae").and_then(|f| f.as_object()) {
-        Some(o) => o,
-        None => return map,
+    let Some(formulae) = v.get("formulae").and_then(|f| f.as_object()) else {
+        return map;
     };
     for (name, arr) in formulae {
         let count = arr
@@ -115,13 +113,12 @@ fn cached_or_fetch(path: &Path, url: &str) -> Option<(String, bool)> {
     let fresh = std::fs::metadata(path)
         .and_then(|m| m.modified())
         .ok()
-        .map(|mtime| {
+        .is_some_and(|mtime| {
             SystemTime::now()
                 .duration_since(mtime)
                 .unwrap_or(Duration::MAX)
                 < Duration::from_secs(24 * 60 * 60)
-        })
-        .unwrap_or(false);
+        });
 
     if fresh {
         return std::fs::read_to_string(path).ok().map(|body| (body, true));
@@ -201,7 +198,7 @@ const CATALOG_URL: &str = "https://formulae.brew.sh/api/formula.json";
 /// catalog cannot be obtained at all (no memory copy, no disk copy, no network).
 fn load_catalog(cache_dir: &Path) -> Option<CatalogAndAnalytics> {
     {
-        let guard = catalog_cell().lock().unwrap();
+        let guard = crate::lock(catalog_cell());
         if let Some(c) = guard.as_ref() {
             if is_fresh(c) {
                 return Some((c.formulae.clone(), c.analytics.clone()));
@@ -210,12 +207,12 @@ fn load_catalog(cache_dir: &Path) -> Option<CatalogAndAnalytics> {
     }
 
     // Only one thread fetches/parses at a time; everyone else queues here.
-    let _fetch_permit = fetch_gate().lock().unwrap();
+    let _fetch_permit = crate::lock(fetch_gate());
 
     // Re-check: another thread may have filled the cache while we waited
     // for the gate.
     {
-        let guard = catalog_cell().lock().unwrap();
+        let guard = crate::lock(catalog_cell());
         if let Some(c) = guard.as_ref() {
             if is_fresh(c) {
                 return Some((c.formulae.clone(), c.analytics.clone()));
@@ -257,8 +254,7 @@ fn load_catalog(cache_dir: &Path) -> Option<CatalogAndAnalytics> {
         SystemTime::now() - Duration::from_secs(24 * 60 * 60)
     };
 
-    let mut guard = catalog_cell().lock().unwrap();
-    *guard = Some(CatalogCache {
+    *crate::lock(catalog_cell()) = Some(CatalogCache {
         loaded,
         formulae: formulae.clone(),
         analytics: analytics.clone(),
@@ -277,18 +273,15 @@ pub fn warm_brew(cache_dir: &Path) {
 /// Called when the user clears the on-disk caches, otherwise the fresh
 /// in-memory copy would mask the deletion until restart.
 pub fn invalidate_catalog() {
-    if let Ok(mut guard) = catalog_cell().lock() {
-        *guard = None;
-    }
+    *crate::lock(catalog_cell()) = None;
 }
 
 /// Search brew formulae using the in-memory parsed catalog (backed by a 24h
 /// disk cache and analytics). If the catalog cannot be obtained at all, returns
 /// an empty list so brew is simply absent rather than an error.
 pub fn search_brew(query: &str, cache_dir: &Path) -> Vec<SearchResult> {
-    let (formulae, analytics) = match load_catalog(cache_dir) {
-        Some(pair) => pair,
-        None => return Vec::new(),
+    let Some((formulae, analytics)) = load_catalog(cache_dir) else {
+        return Vec::new();
     };
     search_parsed(&formulae, query, &analytics)
 }
@@ -417,7 +410,7 @@ mod tests {
                 let fetch_count = fetch_count.clone();
                 let filled = filled.clone();
                 std::thread::spawn(move || {
-                    let _permit = fetch_gate().lock().unwrap();
+                    let _permit = crate::lock(fetch_gate());
                     if !filled.load(Ordering::SeqCst) {
                         fetch_count.fetch_add(1, Ordering::SeqCst);
                         filled.store(true, Ordering::SeqCst);

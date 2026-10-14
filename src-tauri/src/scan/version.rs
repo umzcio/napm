@@ -147,7 +147,7 @@ pub fn bump_kind(installed: &str, latest: &str) -> &'static str {
 /// non-numeric suffix. Missing segments count as 0.
 fn version_triple(v: &str) -> (u64, u64, u64) {
     let parts: Vec<&str> = v.split('.').collect();
-    let seg = |i: usize| -> u64 { parts.get(i).map(|s| split_numeric_prefix(s).0).unwrap_or(0) };
+    let seg = |i: usize| -> u64 { parts.get(i).map_or(0, |s| split_numeric_prefix(s).0) };
     (seg(0), seg(1), seg(2))
 }
 

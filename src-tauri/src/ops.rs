@@ -157,12 +157,11 @@ pub fn brew_dependents(pkg: &str) -> Vec<String> {
     if !valid_pkg("brew", pkg) {
         return Vec::new();
     }
-    let output = match Command::new("brew")
+    let Ok(output) = Command::new("brew")
         .args(["uses", "--installed", pkg])
         .output()
-    {
-        Ok(o) => o,
-        Err(_) => return Vec::new(),
+    else {
+        return Vec::new();
     };
     if !output.status.success() {
         return Vec::new();
@@ -193,7 +192,7 @@ fn display_command(prog: &str, args: &[String]) -> String {
 }
 
 use serde::Serialize;
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
@@ -218,9 +217,8 @@ fn stream_lines<R: std::io::Read>(pipe: R, mut emit: impl FnMut(String)) {
     let mut buf: Vec<u8> = Vec::new();
     loop {
         buf.clear();
-        let n = match reader.read_until(b'\n', &mut buf) {
-            Ok(n) => n,
-            Err(_) => break,
+        let Ok(n) = reader.read_until(b'\n', &mut buf) else {
+            break;
         };
         if n == 0 {
             break;
@@ -251,22 +249,17 @@ use crate::store::{HistoryEntry, Store};
 /// global queue: different packages still run concurrently. This only rejects
 /// a duplicate operation on the SAME package (e.g. a double-click on Get, or
 /// Update All somehow enqueuing the same row twice).
-static IN_FLIGHT: Mutex<Option<HashSet<(String, String)>>> = Mutex::new(None);
+static IN_FLIGHT: Mutex<BTreeSet<(String, String)>> = Mutex::new(BTreeSet::new());
 
 /// Try to claim (eco, pkg) as in flight. Returns false when an operation for
 /// it is already running.
 fn try_begin(eco: &str, pkg: &str) -> bool {
-    let mut guard = IN_FLIGHT.lock().unwrap();
-    let set = guard.get_or_insert_with(HashSet::new);
-    set.insert((eco.to_string(), pkg.to_string()))
+    crate::lock(&IN_FLIGHT).insert((eco.to_string(), pkg.to_string()))
 }
 
 /// Release the (eco, pkg) claim taken by `try_begin`.
 fn finish(eco: &str, pkg: &str) {
-    let mut guard = IN_FLIGHT.lock().unwrap();
-    if let Some(set) = guard.as_mut() {
-        set.remove(&(eco.to_string(), pkg.to_string()));
-    }
+    crate::lock(&IN_FLIGHT).remove(&(eco.to_string(), pkg.to_string()));
 }
 
 /// RAII guard that releases the (eco, pkg) in-flight claim on drop, so a
@@ -299,6 +292,8 @@ struct DoneEvent {
 /// Spawn the operation on a background thread, streaming `transfer-line` events
 /// and a final `transfer-done`. On success, log a HistoryEntry to `store`.
 /// Returns immediately. `ts` is the current Unix time (the caller stamps it).
+// Mirrors the `run_op` Tauri command's arguments one-to-one, and every one is
+// moved into the worker thread; a wrapper struct would only rename them.
 #[allow(clippy::too_many_arguments)]
 pub fn run_op(
     app: AppHandle,
@@ -339,27 +334,24 @@ pub fn run_op(
             eco: eco.clone(),
             pkg: pkg.clone(),
         };
-        let (prog, args) = match built {
-            Some(c) => c,
-            None => {
-                let _ = app.emit(
-                    "transfer-line",
-                    LineEvent {
-                        op_id: op_id.clone(),
-                        stream: "stderr".into(),
-                        line: format!("unsupported operation: {} {}", eco, action),
-                    },
-                );
-                let _ = app.emit(
-                    "transfer-done",
-                    DoneEvent {
-                        op_id: op_id.clone(),
-                        success: false,
-                        code: -1,
-                    },
-                );
-                return;
-            }
+        let Some((prog, args)) = built else {
+            let _ = app.emit(
+                "transfer-line",
+                LineEvent {
+                    op_id: op_id.clone(),
+                    stream: "stderr".into(),
+                    line: format!("unsupported operation: {} {}", eco, action),
+                },
+            );
+            let _ = app.emit(
+                "transfer-done",
+                DoneEvent {
+                    op_id: op_id.clone(),
+                    success: false,
+                    code: -1,
+                },
+            );
+            return;
         };
 
         let mut child = match Command::new(&prog)
@@ -441,11 +433,8 @@ pub fn run_op(
             let _ = h.join();
         }
 
-        let code = status
-            .as_ref()
-            .map(|s| s.code().unwrap_or(-1))
-            .unwrap_or(-1);
-        let success = status.map(|s| s.success()).unwrap_or(false);
+        let code = status.as_ref().map_or(-1, |s| s.code().unwrap_or(-1));
+        let success = status.is_ok_and(|s| s.success());
 
         if success {
             // The op itself succeeded, so a history-write failure must not

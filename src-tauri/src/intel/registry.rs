@@ -9,14 +9,14 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 /// How long a cached copy (memory or disk) is considered fresh.
 const TTL: Duration = Duration::from_secs(3600);
 
 type DocKey = (String, String);
-type DocEntry = (Instant, Arc<String>);
+type DocEntry = (Instant, String);
 type DocMap = HashMap<DocKey, DocEntry>;
 
 fn docs_cell() -> &'static Mutex<DocMap> {
@@ -28,25 +28,18 @@ fn docs_cell() -> &'static Mutex<DocMap> {
 /// on-disk caches, otherwise the fresh in-memory copy would mask the deletion
 /// until restart (mirrors `search::brew::invalidate_catalog`).
 pub fn invalidate() {
-    if let Ok(mut guard) = docs_cell().lock() {
-        guard.clear();
-    }
+    crate::lock(docs_cell()).clear();
 }
 
 fn memory_get(key: &DocKey) -> Option<String> {
-    let guard = docs_cell().lock().ok()?;
-    let (t, s) = guard.get(key)?;
-    if t.elapsed() < TTL {
-        Some((**s).clone())
-    } else {
-        None
-    }
+    crate::lock(docs_cell())
+        .get(key)
+        .filter(|(t, _)| t.elapsed() < TTL)
+        .map(|(_, body)| body.clone())
 }
 
 fn memory_put(key: &DocKey, body: &str) {
-    if let Ok(mut guard) = docs_cell().lock() {
-        guard.insert(key.clone(), (Instant::now(), Arc::new(body.to_string())));
-    }
+    crate::lock(docs_cell()).insert(key.clone(), (Instant::now(), body.to_string()));
 }
 
 fn disk_path(eco: &str, pkg: &str, cache_dir: &Path) -> PathBuf {
@@ -108,7 +101,7 @@ fn doc_with(
     let path = disk_path(eco, pkg, cache_dir);
     if let Ok(meta) = std::fs::metadata(&path) {
         if let Ok(modified) = meta.modified() {
-            if modified.elapsed().map(|e| e < TTL).unwrap_or(false) {
+            if modified.elapsed().is_ok_and(|e| e < TTL) {
                 if let Ok(body) = std::fs::read_to_string(&path) {
                     memory_put(&key, &body);
                     return Some(body);

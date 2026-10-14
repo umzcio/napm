@@ -28,5 +28,17 @@ ureq = "2"
 [target.'cfg(target_os = "macos")'.dependencies]
 tauri-plugin-updater = "2.10.1"
 
+# Lints beyond clippy's defaults that the code is already clean against. CI
+# runs clippy with `-D warnings`, so "warn" here fails the build on regression.
+[lints.clippy]
+assigning_clones = "warn"
+format_push_string = "warn"
+manual_let_else = "warn"
+manual_string_new = "warn"
+map_unwrap_or = "warn"
+redundant_clone = "warn"
+redundant_closure_for_method_calls = "warn"
+ref_option = "warn"
+
 [dev-dependencies]
 minisign-verify = "0.2.5"

@@ -19,9 +19,8 @@ pub fn parse_osv_batch(json: &str) -> Vec<Vec<String>> {
         Ok(v) => v,
         Err(_) => return Vec::new(),
     };
-    let results = match v.get("results").and_then(|r| r.as_array()) {
-        Some(a) => a,
-        None => return Vec::new(),
+    let Some(results) = v.get("results").and_then(|r| r.as_array()) else {
+        return Vec::new();
     };
     results
         .iter()

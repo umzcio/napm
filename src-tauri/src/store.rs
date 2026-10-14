@@ -152,7 +152,7 @@ impl Store {
     }
 
     pub fn set_pin(&self, pkg: &str, on: bool) -> std::io::Result<()> {
-        let _g = STORE_LOCK.lock().unwrap();
+        let _g = crate::lock(&STORE_LOCK);
         let mut pins = self.pins();
         if on {
             pins.insert(pkg.to_string());
@@ -170,7 +170,7 @@ impl Store {
     }
 
     pub fn add_history(&self, entry: HistoryEntry) -> std::io::Result<()> {
-        let _g = STORE_LOCK.lock().unwrap();
+        let _g = crate::lock(&STORE_LOCK);
         let mut h: Vec<HistoryEntry> = Self::read_json(&self.history_path());
         h.push(entry);
         h.sort_by_key(|e| std::cmp::Reverse(e.ts));
@@ -187,7 +187,7 @@ impl Store {
     }
 
     pub fn set_settings(&self, s: &Settings) -> std::io::Result<()> {
-        let _g = STORE_LOCK.lock().unwrap();
+        let _g = crate::lock(&STORE_LOCK);
         Self::write_json(&self.settings_path(), s)
     }
 

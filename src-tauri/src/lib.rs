@@ -12,13 +12,33 @@ use scan::InstalledTool;
 use store::{HistoryEntry, Store};
 use tauri::Manager;
 
+/// The platform app-data directory, or the working directory if the platform
+/// cannot resolve one. Not created here; callers that write create it.
+fn app_data_dir(app: &tauri::AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+}
+
 /// Open the Store rooted at the platform app-data directory.
 fn open_store(app: &tauri::AppHandle) -> Store {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."));
-    Store::new(dir)
+    Store::new(app_data_dir(app))
+}
+
+/// Current Unix time in whole seconds, or 0 if the clock reads before 1970.
+pub(crate) fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64)
+}
+
+/// Lock `m`, recovering the guard if a panicking thread poisoned it. Every
+/// mutex in napm guards either `()` or cache data whose updates are single
+/// insert/remove/extend/assign calls, so a panic cannot leave it half-written.
+/// Propagating the poison instead would turn one panicked command into a
+/// panic on every later call that touches the same lock.
+pub(crate) fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 #[tauri::command(async)]
@@ -52,11 +72,8 @@ fn run_op(
     action: String,
 ) {
     let store = open_store(&app);
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
-    ops::run_op(app.clone(), store, op_id, eco, pkg, from, to, action, ts);
+    let ts = unix_now();
+    ops::run_op(app, store, op_id, eco, pkg, from, to, action, ts);
 }
 
 /// Installed Homebrew formulae that currently depend on `pkg`, used by the
@@ -72,10 +89,7 @@ fn brew_uninstall_check(pkg: String) -> Vec<String> {
 
 #[tauri::command(async)]
 fn search_registry(app: tauri::AppHandle, query: String) -> Vec<search::SearchResult> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let dir = app_data_dir(&app);
     let _ = std::fs::create_dir_all(&dir);
     let sources = open_store(&app).settings().sources;
     search::search_all(&query, &dir, sources)
@@ -87,25 +101,16 @@ fn get_whats_new(
     installed: Vec<intel::ToolRef>,
     verdict_scope: Vec<intel::ScopeRef>,
 ) -> intel::WhatsNew {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let dir = app_data_dir(&app);
     let _ = std::fs::create_dir_all(&dir);
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+    let now = unix_now();
     let advisories_enabled = open_store(&app).settings().advisory_checks;
     intel::whats_new(&installed, &verdict_scope, &dir, now, advisories_enabled)
 }
 
 #[tauri::command(async)]
 fn get_changelog(app: tauri::AppHandle, eco: String, pkg: String, version: String) -> Vec<String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let dir = app_data_dir(&app);
     let _ = std::fs::create_dir_all(&dir);
     intel::release::changelog(&eco, &pkg, &version, &dir)
 }
@@ -137,10 +142,7 @@ fn export_library(
     filename: String,
     content: String,
 ) -> Result<String, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let dir = app_data_dir(&app);
     let _ = std::fs::create_dir_all(&dir);
     // Sanitize the frontend-supplied filename: no path separators or traversal.
     let safe = cache::sanitize_key(&filename);
@@ -178,10 +180,7 @@ fn import_preview(
 
 #[tauri::command(async)]
 fn open_data_dir(app: tauri::AppHandle) {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let dir = app_data_dir(&app);
     let _ = std::fs::create_dir_all(&dir);
     let _ = std::process::Command::new("open").arg(&dir).spawn();
 }
@@ -207,10 +206,7 @@ struct NpxLatest {
 /// concurrent workers rather than one thread per package.
 #[tauri::command(async)]
 fn npx_latest(app: tauri::AppHandle, pkgs: Vec<String>) -> Vec<NpxLatest> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let dir = app_data_dir(&app);
     let _ = std::fs::create_dir_all(&dir);
 
     let mut results: Vec<Option<NpxLatest>> = (0..pkgs.len()).map(|_| None).collect();
@@ -258,10 +254,7 @@ fn reveal_in_finder(path: String) {
 
 #[tauri::command(async)]
 fn clear_caches(app: tauri::AppHandle) {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let dir = app_data_dir(&app);
     for name in [
         "brew_catalog.json",
         "brew_analytics.json",
@@ -290,12 +283,8 @@ fn clear_caches(app: tauri::AppHandle) {
     }
     // Re-warm the brew catalog in the background so the next search is not cold.
     std::thread::spawn(move || {
-        let d = app
-            .path()
-            .app_data_dir()
-            .unwrap_or_else(|_| std::path::PathBuf::from("."));
-        let _ = std::fs::create_dir_all(&d);
-        search::brew::warm_brew(&d);
+        let _ = std::fs::create_dir_all(&dir);
+        search::brew::warm_brew(&dir);
     });
 }
 
@@ -321,8 +310,8 @@ async fn check_for_update(app: tauri::AppHandle) -> Result<Option<UpdateMeta>, S
     let updater = app.updater().map_err(|e| e.to_string())?;
     let update = updater.check().await.map_err(|e| e.to_string())?;
     Ok(update.map(|u| UpdateMeta {
-        version: u.version.clone(),
-        notes: u.body.clone().unwrap_or_default(),
+        version: u.version,
+        notes: u.body.unwrap_or_default(),
         pub_date: u.date.map(|d| d.to_string()).unwrap_or_default(),
     }))
 }
@@ -386,10 +375,7 @@ pub fn run() {
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
             // Warm the brew catalog in the background so the first search is not cold.
             // Best-effort: never block startup on the network.
-            let dir = app
-                .path()
-                .app_data_dir()
-                .unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let dir = app_data_dir(app.handle());
             // One-time migration from the pre-rename app-data dir (com.tauri.dev).
             if let Some(parent) = dir.parent() {
                 store::migrate_legacy(&dir, &parent.join("com.tauri.dev"));
@@ -402,4 +388,25 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    #[test]
+    fn lock_should_recover_guard_after_a_panicking_holder_poisons_the_mutex() {
+        let m = Mutex::new(vec![1]);
+        let _ = std::thread::scope(|s| {
+            s.spawn(|| {
+                let _g = m.lock().unwrap();
+                panic!("poison the lock");
+            })
+            .join()
+        });
+        assert!(m.is_poisoned());
+        lock(&m).push(2);
+        assert_eq!(*lock(&m), vec![1, 2]);
+    }
 }

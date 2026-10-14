@@ -2,7 +2,7 @@ use super::InstalledTool;
 use serde_json::Value;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 /// The global npm module root (e.g. `/opt/homebrew/lib/node_modules`), from
@@ -10,7 +10,7 @@ use std::sync::OnceLock;
 /// this only spawns once per napm run rather than once per scan. Per-process
 /// value: a change to the global npm prefix while napm is running is only
 /// picked up after an app restart.
-pub(crate) fn npm_root() -> &'static Option<PathBuf> {
+pub(crate) fn npm_root() -> Option<&'static Path> {
     static P: OnceLock<Option<PathBuf>> = OnceLock::new();
     P.get_or_init(|| {
         let out = super::run("npm", &["root", "-g"]);
@@ -21,6 +21,7 @@ pub(crate) fn npm_root() -> &'static Option<PathBuf> {
             Some(PathBuf::from(p))
         }
     })
+    .as_deref()
 }
 
 /// Merge `npm ls -g --json` (installed) with `npm outdated -g --json` (latest),
@@ -57,7 +58,10 @@ pub fn parse_npm(ls_json: &str, outdated_json: &str) -> Vec<InstalledTool> {
                     Entry::Vacant(v) => {
                         // Skip malformed outdated entries that carry no latest version.
                         if !latest.is_empty() {
-                            v.insert((current.map(|s| s.to_string()), latest.to_string()));
+                            v.insert((
+                                current.map(std::string::ToString::to_string),
+                                latest.to_string(),
+                            ));
                         }
                     }
                 }
@@ -97,9 +101,8 @@ pub fn scan_npm() -> Vec<InstalledTool> {
 /// Fill in each row's publisher, description, size, and updated time from the
 /// installed package on disk (under the global npm root). Best-effort.
 fn enrich(rows: &mut [InstalledTool]) {
-    let base = match npm_root() {
-        Some(p) => p,
-        None => return,
+    let Some(base) = npm_root() else {
+        return;
     };
     for row in rows.iter_mut() {
         let dir = base.join(&row.pkg);
