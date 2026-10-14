@@ -295,7 +295,8 @@ zMeet/zMD/fiddle: `Developer ID Application: The University of Montana
 - **Sign + notarize.** Tauri signs the `.app` with the Developer ID identity
   (hardened runtime + entitlements) during build; then `xcrun notarytool submit
   --wait` + `xcrun stapler staple` the `.dmg`, mirroring zMeet's `notarize.sh`.
-- **Installer.** A styled drag-to-Applications `.dmg` (Tauri dmg target).
+- **Installer.** A styled drag-to-Applications `.dmg` (built by create-dmg via
+  `scripts/make-dmg.sh`; originally the Tauri dmg target).
 - **Auto-updater.** Tauri updater plugin: a minisign signing keypair (pubkey
   baked into the app, privkey kept secret), a hosted `latest.json` + signed
   bundle on GitHub Releases. UX: check on launch and notify (unobtrusive prompt),
@@ -319,7 +320,8 @@ Four parked items, batched and shipped:
   differs show a muted "cached vX, npx pulls vY on next run" hint. The row stays
   "current" and never joins Update All.
 - **npstr DMG background.** An original gray-beveled installer background
-  (`scripts/make-dmg-bg.py`) wired via `bundle.macOS.dmg`.
+  (`scripts/make-dmg-bg.py`), originally wired via `bundle.macOS.dmg` and now
+  a Retina TIFF consumed by `scripts/make-dmg.sh` (create-dmg).
 - **Crate rename.** `app` -> `napm`, so the process/binary is `napm` (was `app`);
   the WebView cache path (`com.napm.app`) is unchanged.
 

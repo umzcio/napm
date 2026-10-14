@@ -39,7 +39,7 @@ pub fn first_version(s: &str) -> Option<String> {
 
 /// Directory prefixes whose contents are owned by a package manager, toolchain,
 /// or the OS, and must never be surfaced as manual installs.
-fn managed_roots() -> Vec<PathBuf> {
+fn managed_roots(home: Option<&Path>) -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = vec![
         PathBuf::from("/usr/bin"),
         PathBuf::from("/bin"),
@@ -60,7 +60,7 @@ fn managed_roots() -> Vec<PathBuf> {
         roots.push(prefix.to_path_buf());
     }
     // Home-relative toolchain / version-manager dirs and the npx cache.
-    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+    if let Some(home) = home {
         for sub in [
             ".cargo", ".rustup", ".nvm", ".pyenv", ".volta", ".asdf", "go/bin",
         ] {
@@ -259,10 +259,22 @@ pub fn scan_manual(
     cache_dir: &Path,
 ) -> Vec<InstalledTool> {
     let home = std::env::var_os("HOME").map(PathBuf::from);
-    let roots = managed_roots();
     let Some(path) = std::env::var_os("PATH") else {
         return Vec::new();
     };
+    scan_manual_in(&path, home.as_deref(), other_names, probe_manual, cache_dir)
+}
+
+/// `scan_manual` with `$PATH` and `$HOME` passed in, so tests can point it at
+/// a fixture tree without mutating process-global env vars.
+fn scan_manual_in(
+    path: &std::ffi::OsStr,
+    home: Option<&Path>,
+    other_names: &BTreeSet<String>,
+    probe_manual: bool,
+    cache_dir: &Path,
+) -> Vec<InstalledTool> {
+    let roots = managed_roots(home);
 
     // Phase 1: walk $PATH and collect candidates. Filesystem-only: nothing is
     // executed here.
@@ -324,7 +336,7 @@ pub fn scan_manual(
             .get(&key)
             .filter(|e| e.mtime == c.mtime && e.size == c.size)
             .map(|e| e.version.as_str());
-        let plan = plan_version(&c.real, home.as_deref(), probe_manual, cached);
+        let plan = plan_version(&c.real, home, probe_manual, cached);
         if plan == VersionPlan::Probe {
             miss_indices.push(i);
         }
@@ -714,30 +726,14 @@ mod tests {
         let cache_dir = base.join("cache");
         std::fs::create_dir_all(&cache_dir).unwrap();
 
-        // SAFETY: test-only env mutation, restored at the end; napm's test
-        // suite does not run these manual.rs env-dependent tests concurrently
-        // with other HOME/PATH-sensitive tests within this process by design
-        // (each such test fully owns and restores HOME/PATH around its body).
-        let old_home = std::env::var_os("HOME");
-        let old_path = std::env::var_os("PATH");
-        unsafe {
-            std::env::set_var("HOME", &home);
-            std::env::set_var("PATH", &bindir);
-        }
-
         let other_names = BTreeSet::new();
-        let rows = scan_manual(&other_names, false, &cache_dir);
-
-        unsafe {
-            match old_home {
-                Some(v) => std::env::set_var("HOME", v),
-                None => std::env::remove_var("HOME"),
-            }
-            match old_path {
-                Some(v) => std::env::set_var("PATH", v),
-                None => std::env::remove_var("PATH"),
-            }
-        }
+        let rows = scan_manual_in(
+            bindir.as_os_str(),
+            Some(&home),
+            &other_names,
+            false,
+            &cache_dir,
+        );
 
         assert!(rows.iter().any(|r| r.name == "mystery"));
         let row = rows.iter().find(|r| r.name == "mystery").unwrap();

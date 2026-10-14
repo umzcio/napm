@@ -219,11 +219,24 @@ fn nonempty_env_path(key: &str) -> Option<PathBuf> {
 /// `install.root` key in the cargo config, else `CARGO_HOME`, else
 /// `$HOME/.cargo`. None only when no home/env signal exists at all.
 fn resolve_cargo_root() -> Option<PathBuf> {
-    if let Some(p) = nonempty_env_path("CARGO_INSTALL_ROOT") {
-        return Some(p);
+    resolve_cargo_root_from(
+        nonempty_env_path("CARGO_INSTALL_ROOT"),
+        nonempty_env_path("CARGO_HOME"),
+        std::env::var_os("HOME").map(PathBuf::from),
+    )
+}
+
+/// `resolve_cargo_root` with the environment passed in, so tests can cover
+/// each precedence step without mutating process-global env vars.
+fn resolve_cargo_root_from(
+    install_root: Option<PathBuf>,
+    cargo_home: Option<PathBuf>,
+    home: Option<PathBuf>,
+) -> Option<PathBuf> {
+    if install_root.is_some() {
+        return install_root;
     }
-    let cargo_home = nonempty_env_path("CARGO_HOME")
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cargo")));
+    let cargo_home = cargo_home.or_else(|| home.map(|h| h.join(".cargo")));
     if let Some(ch) = &cargo_home {
         for name in ["config.toml", "config"] {
             if let Ok(text) = std::fs::read_to_string(ch.join(name)) {
@@ -720,64 +733,54 @@ mod tests {
         assert_eq!(author, None);
     }
 
-    // resolve_cargo_root reads CARGO_INSTALL_ROOT/CARGO_HOME directly (it is
-    // the un-memoized inner function; cargo_root() wraps it in a OnceLock for
-    // production use, which would make env-var-dependent tests order-flaky).
-    // All three scenarios run in ONE test, sequentially, rather than as
-    // separate #[test] functions: cargo test runs tests in parallel threads
-    // within the same process, and separate tests mutating the same global
-    // env vars (CARGO_INSTALL_ROOT/CARGO_HOME) would race each other.
-    #[test]
-    fn resolve_cargo_root_precedence() {
-        let old_root = std::env::var_os("CARGO_INSTALL_ROOT");
-        let old_home_env = std::env::var_os("CARGO_HOME");
-        let dir = std::env::temp_dir().join(format!(
-            "napm-cargo-root-test-{}-{:p}",
-            std::process::id(),
-            &old_root
-        ));
+    fn cargo_home_fixture(name: &str, config: Option<&str>) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("napm-cargo-root-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-
-        // 1. CARGO_INSTALL_ROOT wins over everything, even a CARGO_HOME with
-        //    its own install.root config.
-        std::fs::write(
-            dir.join("config.toml"),
-            b"[install]\nroot = \"/opt/cargo-from-config\"\n",
-        )
-        .unwrap();
-        unsafe {
-            std::env::set_var("CARGO_INSTALL_ROOT", "/opt/cargo-custom");
-            std::env::set_var("CARGO_HOME", &dir);
+        if let Some(text) = config {
+            std::fs::write(dir.join("config.toml"), text).unwrap();
         }
-        assert_eq!(
-            resolve_cargo_root(),
-            Some(PathBuf::from("/opt/cargo-custom"))
+        dir
+    }
+
+    #[test]
+    fn resolve_cargo_root_prefers_install_root_over_cargo_home_config() {
+        let dir = cargo_home_fixture(
+            "install-root",
+            Some("[install]\nroot = \"/opt/cargo-from-config\"\n"),
         );
-
-        // 2. No CARGO_INSTALL_ROOT: the CARGO_HOME config's install.root wins.
-        unsafe {
-            std::env::remove_var("CARGO_INSTALL_ROOT");
-        }
-        assert_eq!(
-            resolve_cargo_root(),
-            Some(PathBuf::from("/opt/cargo-from-config"))
+        let root = resolve_cargo_root_from(
+            Some(PathBuf::from("/opt/cargo-custom")),
+            Some(dir.clone()),
+            None,
         );
-
-        // 3. No config file either: falls back to CARGO_HOME itself.
-        std::fs::remove_file(dir.join("config.toml")).unwrap();
-        assert_eq!(resolve_cargo_root(), Some(dir.clone()));
-
-        unsafe {
-            match old_root {
-                Some(v) => std::env::set_var("CARGO_INSTALL_ROOT", v),
-                None => std::env::remove_var("CARGO_INSTALL_ROOT"),
-            }
-            match old_home_env {
-                Some(v) => std::env::set_var("CARGO_HOME", v),
-                None => std::env::remove_var("CARGO_HOME"),
-            }
-        }
+        assert_eq!(root, Some(PathBuf::from("/opt/cargo-custom")));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_cargo_root_uses_cargo_home_config_install_root() {
+        let dir = cargo_home_fixture(
+            "config",
+            Some("[install]\nroot = \"/opt/cargo-from-config\"\n"),
+        );
+        let root = resolve_cargo_root_from(None, Some(dir.clone()), None);
+        assert_eq!(root, Some(PathBuf::from("/opt/cargo-from-config")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_cargo_root_falls_back_to_cargo_home_without_config() {
+        let dir = cargo_home_fixture("bare", None);
+        let root = resolve_cargo_root_from(None, Some(dir.clone()), None);
+        assert_eq!(root, Some(dir.clone()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_cargo_root_falls_back_to_home_dot_cargo() {
+        let root = resolve_cargo_root_from(None, None, Some(PathBuf::from("/nonexistent-home")));
+        assert_eq!(root, Some(PathBuf::from("/nonexistent-home/.cargo")));
     }
 }

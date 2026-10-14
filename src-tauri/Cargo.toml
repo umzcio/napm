@@ -1,6 +1,6 @@
 [package]
 name = "napm"
-version = "0.1.8"
+version = "0.1.9"
 description = "napm: a desktop package manager for command-line dev tools"
 authors = ["umzcio <umzcio@users.noreply.github.com>"]
 license = "MIT"
@@ -28,6 +28,11 @@ ureq = "2"
 [target.'cfg(target_os = "macos")'.dependencies]
 tauri-plugin-updater = "2.10.1"
 
+# napm has no unsafe code; keep it that way. Tests inject env values through
+# parameters instead of calling the (unsafe) std::env::set_var.
+[lints.rust]
+unsafe_code = "forbid"
+
 # Lints beyond clippy's defaults that the code is already clean against. CI
 # runs clippy with `-D warnings`, so "warn" here fails the build on regression.
 [lints.clippy]
@@ -42,3 +47,4 @@ ref_option = "warn"
 
 [dev-dependencies]
 minisign-verify = "0.2.5"
+proptest = { version = "1", default-features = false, features = ["std"] }

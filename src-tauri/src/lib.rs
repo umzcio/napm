@@ -41,12 +41,31 @@ pub(crate) fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-#[tauri::command(async)]
-fn scan_installed(app: tauri::AppHandle) -> Vec<InstalledTool> {
-    let store = open_store(&app);
-    let pins = store.pins();
-    let settings = store.settings();
-    scan::scan_all(&pins, settings.sources, settings.probe_manual, store.dir())
+/// Run blocking work (shell-outs, `ureq` HTTP, filesystem walks) on the async
+/// runtime's blocking pool. A sync `#[tauri::command(async)]` body runs
+/// directly on a runtime worker thread, so a slow `brew` call or a network
+/// timeout would occupy that worker for its whole duration and could starve
+/// the genuinely async commands (the updater). A panic in `f` comes back as an
+/// `Err` that rejects the frontend promise instead of leaving it pending.
+async fn blocking<T, F>(f: F) -> Result<T, String>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn scan_installed(app: tauri::AppHandle) -> Result<Vec<InstalledTool>, String> {
+    blocking(move || {
+        let store = open_store(&app);
+        let pins = store.pins();
+        let settings = store.settings();
+        scan::scan_all(&pins, settings.sources, settings.probe_manual, store.dir())
+    })
+    .await
 }
 
 #[tauri::command(async)]
@@ -82,46 +101,66 @@ fn run_op(
 /// are no dependents, or the check itself could not run; either way the
 /// caller does not block on it, since the real `brew uninstall` remains the
 /// source of truth and streams its own honest failure.
-#[tauri::command(async)]
-fn brew_uninstall_check(pkg: String) -> Vec<String> {
-    ops::brew_dependents(&pkg)
+#[tauri::command]
+async fn brew_uninstall_check(pkg: String) -> Result<Vec<String>, String> {
+    blocking(move || ops::brew_dependents(&pkg)).await
 }
 
-#[tauri::command(async)]
-fn search_registry(app: tauri::AppHandle, query: String) -> Vec<search::SearchResult> {
-    let dir = app_data_dir(&app);
-    let _ = std::fs::create_dir_all(&dir);
-    let sources = open_store(&app).settings().sources;
-    search::search_all(&query, &dir, sources)
+#[tauri::command]
+async fn search_registry(
+    app: tauri::AppHandle,
+    query: String,
+) -> Result<Vec<search::SearchResult>, String> {
+    blocking(move || {
+        let dir = app_data_dir(&app);
+        let _ = std::fs::create_dir_all(&dir);
+        let sources = open_store(&app).settings().sources;
+        search::search_all(&query, &dir, sources)
+    })
+    .await
 }
 
-#[tauri::command(async)]
-fn get_whats_new(
+#[tauri::command]
+async fn get_whats_new(
     app: tauri::AppHandle,
     installed: Vec<intel::ToolRef>,
     verdict_scope: Vec<intel::ScopeRef>,
-) -> intel::WhatsNew {
-    let dir = app_data_dir(&app);
-    let _ = std::fs::create_dir_all(&dir);
-    let now = unix_now();
-    let advisories_enabled = open_store(&app).settings().advisory_checks;
-    intel::whats_new(&installed, &verdict_scope, &dir, now, advisories_enabled)
-}
-
-#[tauri::command(async)]
-fn get_changelog(app: tauri::AppHandle, eco: String, pkg: String, version: String) -> Vec<String> {
-    let dir = app_data_dir(&app);
-    let _ = std::fs::create_dir_all(&dir);
-    intel::release::changelog(&eco, &pkg, &version, &dir)
-}
-
-#[tauri::command(async)]
-fn get_advisory(id: String) -> Option<intel::Advisory> {
-    intel::osv::fetch_advisory(&id).map(|(severity, summary, fixed_version)| intel::Advisory {
-        severity,
-        summary,
-        fixed_version,
+) -> Result<intel::WhatsNew, String> {
+    blocking(move || {
+        let dir = app_data_dir(&app);
+        let _ = std::fs::create_dir_all(&dir);
+        let now = unix_now();
+        let advisories_enabled = open_store(&app).settings().advisory_checks;
+        intel::whats_new(&installed, &verdict_scope, &dir, now, advisories_enabled)
     })
+    .await
+}
+
+#[tauri::command]
+async fn get_changelog(
+    app: tauri::AppHandle,
+    eco: String,
+    pkg: String,
+    version: String,
+) -> Result<Vec<String>, String> {
+    blocking(move || {
+        let dir = app_data_dir(&app);
+        let _ = std::fs::create_dir_all(&dir);
+        intel::release::changelog(&eco, &pkg, &version, &dir)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn get_advisory(id: String) -> Result<Option<intel::Advisory>, String> {
+    blocking(move || {
+        intel::osv::fetch_advisory(&id).map(|(severity, summary, fixed_version)| intel::Advisory {
+            severity,
+            summary,
+            fixed_version,
+        })
+    })
+    .await
 }
 
 #[tauri::command(async)]
@@ -148,11 +187,9 @@ fn export_library(
     let safe = cache::sanitize_key(&filename);
     let path = dir.join(safe);
     std::fs::write(&path, content).map_err(|e| e.to_string())?;
-    // -R reveals and selects the new file in Finder.
-    let _ = std::process::Command::new("open")
-        .arg("-R")
-        .arg(&path)
-        .spawn();
+    // -R reveals and selects the new file in Finder. Best-effort: the export
+    // itself already succeeded, and the status line reports its path.
+    let _ = macos_open([std::ffi::OsStr::new("-R"), path.as_os_str()]);
     Ok(path.to_string_lossy().to_string())
 }
 
@@ -163,34 +200,58 @@ fn export_library(
 /// Best-effort network resolution upgrades each will-install row's version to
 /// the ecosystem's current latest; a failed lookup keeps the manifest's
 /// recorded version rather than blocking the whole import.
-#[tauri::command(async)]
-fn import_preview(
+#[tauri::command]
+async fn import_preview(
     app: tauri::AppHandle,
     manifest_json: String,
 ) -> Result<importer::ImportPreview, String> {
-    let manifest = importer::parse_manifest(&manifest_json)?;
-    let store = open_store(&app);
-    let pins = store.pins();
-    let settings = store.settings();
-    let installed = scan::scan_all(&pins, settings.sources, settings.probe_manual, store.dir());
-    let mut preview = importer::classify(&manifest, &installed);
-    importer::resolve_latest_for_will_install(&mut preview, store.dir());
-    Ok(preview)
+    blocking(move || {
+        let manifest = importer::parse_manifest(&manifest_json)?;
+        let store = open_store(&app);
+        let pins = store.pins();
+        let settings = store.settings();
+        let installed = scan::scan_all(&pins, settings.sources, settings.probe_manual, store.dir());
+        let mut preview = importer::classify(&manifest, &installed);
+        importer::resolve_latest_for_will_install(&mut preview, store.dir());
+        Ok(preview)
+    })
+    .await?
 }
 
-#[tauri::command(async)]
-fn open_data_dir(app: tauri::AppHandle) {
-    let dir = app_data_dir(&app);
-    let _ = std::fs::create_dir_all(&dir);
-    let _ = std::process::Command::new("open").arg(&dir).spawn();
-}
-
-#[tauri::command(async)]
-fn open_external(url: String) {
-    // Only open secure web URLs, never arbitrary local paths or args.
-    if url.starts_with("https://") {
-        let _ = std::process::Command::new("open").arg(&url).spawn();
+/// Run macOS `open` with `args` and wait for it. `open` hands the request to
+/// Launch Services and exits at once, so waiting is cheap; it also reaps the
+/// child (a bare `spawn()` left a zombie process per call) and turns a failure
+/// into an error the frontend's status line shows, instead of a silent no-op.
+fn macos_open<I, S>(args: I) -> Result<(), String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
+    let out = std::process::Command::new("open")
+        .args(args)
+        .output()
+        .map_err(|e| format!("could not run open: {e}"))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
     }
+}
+
+#[tauri::command(async)]
+fn open_data_dir(app: tauri::AppHandle) -> Result<(), String> {
+    let dir = app_data_dir(&app);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    macos_open([&dir])
+}
+
+#[tauri::command(async)]
+fn open_external(url: String) -> Result<(), String> {
+    // Only open secure web URLs, never arbitrary local paths or args.
+    if !url.starts_with("https://") {
+        return Err("only https:// links can be opened".to_string());
+    }
+    macos_open([&url])
 }
 
 #[derive(serde::Serialize)]
@@ -204,52 +265,53 @@ struct NpxLatest {
 /// packages are omitted. Used by the frontend to show a drift hint on npx rows.
 /// Goes through the shared registry-document cache and is bounded at 8
 /// concurrent workers rather than one thread per package.
-#[tauri::command(async)]
-fn npx_latest(app: tauri::AppHandle, pkgs: Vec<String>) -> Vec<NpxLatest> {
-    let dir = app_data_dir(&app);
-    let _ = std::fs::create_dir_all(&dir);
+#[tauri::command]
+async fn npx_latest(app: tauri::AppHandle, pkgs: Vec<String>) -> Result<Vec<NpxLatest>, String> {
+    blocking(move || {
+        let dir = app_data_dir(&app);
+        let _ = std::fs::create_dir_all(&dir);
 
-    let mut results: Vec<Option<NpxLatest>> = (0..pkgs.len()).map(|_| None).collect();
-    std::thread::scope(|inner| {
-        let handles: Vec<_> = intel::registry::chunk_indices(pkgs.len(), 8)
-            .into_iter()
-            .map(|idxs| {
-                let pkgs = &pkgs;
-                let dir = &dir;
-                inner.spawn(move || -> Vec<(usize, NpxLatest)> {
-                    idxs.into_iter()
-                        .filter_map(|i| {
-                            let pkg = pkgs[i].clone();
-                            let body = intel::registry::doc("npm", &pkg, dir)?;
-                            let latest = scan::npx::parse_dist_tag_latest(&body)?;
-                            Some((i, NpxLatest { pkg, latest }))
-                        })
-                        .collect()
+        let mut results: Vec<Option<NpxLatest>> = (0..pkgs.len()).map(|_| None).collect();
+        std::thread::scope(|inner| {
+            let handles: Vec<_> = intel::registry::chunk_indices(pkgs.len(), 8)
+                .into_iter()
+                .map(|idxs| {
+                    let pkgs = &pkgs;
+                    let dir = &dir;
+                    inner.spawn(move || -> Vec<(usize, NpxLatest)> {
+                        idxs.into_iter()
+                            .filter_map(|i| {
+                                let pkg = pkgs[i].clone();
+                                let body = intel::registry::doc("npm", &pkg, dir)?;
+                                let latest = scan::npx::parse_dist_tag_latest(&body)?;
+                                Some((i, NpxLatest { pkg, latest }))
+                            })
+                            .collect()
+                    })
                 })
-            })
-            .collect();
-        for h in handles {
-            if let Ok(pairs) = h.join() {
-                for (i, info) in pairs {
-                    results[i] = Some(info);
+                .collect();
+            for h in handles {
+                if let Ok(pairs) = h.join() {
+                    for (i, info) in pairs {
+                        results[i] = Some(info);
+                    }
                 }
             }
-        }
-    });
-    results.into_iter().flatten().collect()
+        });
+        results.into_iter().flatten().collect()
+    })
+    .await
 }
 
 /// Reveal and select a path in Finder (`open -R`). Validates the path exists so
-/// a stale entry never shells an arbitrary string. No-op on a missing path.
+/// a stale entry never shells an arbitrary string; a missing path is an error
+/// the status line shows rather than a click that silently does nothing.
 #[tauri::command(async)]
-fn reveal_in_finder(path: String) {
-    let p = std::path::Path::new(&path);
-    if p.exists() {
-        let _ = std::process::Command::new("open")
-            .arg("-R")
-            .arg(&path)
-            .spawn();
+fn reveal_in_finder(path: String) -> Result<(), String> {
+    if !std::path::Path::new(&path).exists() {
+        return Err(format!("{path} no longer exists"));
     }
+    macos_open(["-R", path.as_str()])
 }
 
 #[tauri::command(async)]
@@ -408,5 +470,17 @@ mod tests {
         assert!(m.is_poisoned());
         lock(&m).push(2);
         assert_eq!(*lock(&m), vec![1, 2]);
+    }
+
+    #[test]
+    fn open_external_should_reject_non_https_urls_without_running_open() {
+        let err = open_external("file:///etc/passwd".to_string()).unwrap_err();
+        assert_eq!(err, "only https:// links can be opened");
+    }
+
+    #[test]
+    fn reveal_in_finder_should_report_a_missing_path_instead_of_doing_nothing() {
+        let err = reveal_in_finder("/nonexistent/napm-test-path".to_string()).unwrap_err();
+        assert_eq!(err, "/nonexistent/napm-test-path no longer exists");
     }
 }

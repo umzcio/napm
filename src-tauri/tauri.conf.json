@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "napm",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "identifier": "com.napm.app",
   "build": {
     "frontendDist": "../frontend"
@@ -27,7 +27,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["app"],
     "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
@@ -38,14 +38,6 @@
     ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
-    },
-    "macOS": {
-      "dmg": {
-        "background": "dmg/background.png",
-        "windowSize": { "width": 660, "height": 420 },
-        "appPosition": { "x": 165, "y": 250 },
-        "applicationFolderPosition": { "x": 495, "y": 250 }
-      }
     }
   },
   "plugins": {
